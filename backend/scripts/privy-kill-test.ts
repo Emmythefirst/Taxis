@@ -21,16 +21,20 @@
  * Privy's own docs during setup: PrivyClient({appId, appSecret}),
  * privy.wallets().create(), privy.wallets().update(),
  * privy.wallets().ethereum().sendTransaction(), privy.policies().create().
- * Two things were NOT directly confirmed in docs and are flagged inline
- * where used — verify against the installed package's TypeScript types if
- * they error:
- *   - the exact shape of `walletApi.authorizationPrivateKey` in the
- *     PrivyClient constructor options (needed to sign server-side updates
- *     to a wallet once it's owned by a key quorum), and
- *   - the calldata condition field name for the ERC-20 `transfer`
- *     recipient parameter (`transfer.recipient`), inferred from the
- *     confirmed `transfer.amount` example by the same method.paramName
- *     convention.
+ *
+ * Authorization signing (confirmed by reading the installed SDK source,
+ * since this wasn't clearly documented): there is no `walletApi` option on
+ * PrivyClient. The quorum's private key must instead be passed per-call as
+ * `authorization_context: { authorization_private_keys: [key] }` on any
+ * request gated by an additional_signers policy (sendTransaction here), and
+ * `key` must be a base64-encoded PKCS8 DER private key with no PEM headers
+ * — not the SEC1 "BEGIN EC PRIVATE KEY" PEM openssl generates by default.
+ * See .env.example for the conversion command.
+ *
+ * One thing NOT directly confirmed in docs and flagged inline where used:
+ * the calldata condition field name for the ERC-20 `transfer` recipient
+ * parameter (`transfer.recipient`), inferred from the confirmed
+ * `transfer.amount` example by the same method.paramName convention.
  *
  * Required env vars: see .env.example. This script does not run in CI —
  * it's a one-time architecture gate, run manually with `npm run privy:kill-test`.
@@ -92,17 +96,21 @@ async function sleep(ms: number) {
 async function main() {
   const appId = requireEnv("PRIVY_APP_ID");
   const appSecret = requireEnv("PRIVY_APP_SECRET");
-  const quorumId = requireEnv("PRIVY_AUTH_KEY_QUORUM_ID");
-  const authorizationPrivateKey = requireEnv("PRIVY_AUTH_PRIVATE_KEY_PEM");
+  const agentQuorumId = requireEnv("PRIVY_AGENT_KEY_QUORUM_ID");
+  const ownerQuorumId = requireEnv("PRIVY_OWNER_KEY_QUORUM_ID");
+  // Base64-encoded PKCS8 DER, no PEM headers — see .env.example for how to
+  // derive this from the SEC1 PEM generated during key-quorum setup.
+  const agentPrivateKey = requireEnv("PRIVY_AGENT_PRIVATE_KEY_B64");
+  const ownerPrivateKey = requireEnv("PRIVY_OWNER_PRIVATE_KEY_B64");
   const validRecipient = requireEnv("KILL_TEST_VALID_RECIPIENT") as `0x${string}`;
   const wrongRecipient = requireEnv("KILL_TEST_WRONG_RECIPIENT") as `0x${string}`;
+  // agentContext signs as the agent's own session key (what gets revoked).
+  // ownerContext signs as the wallet owner (stands in for the user's key) —
+  // required for any wallet-settings change, once the wallet has an owner.
+  const agentContext = { authorization_private_keys: [agentPrivateKey] };
+  const ownerContext = { authorization_private_keys: [ownerPrivateKey] };
 
-  const privy = new PrivyClient({
-    appId,
-    appSecret,
-    // NOT directly confirmed in docs for @privy-io/node — see file header.
-    walletApi: { authorizationPrivateKey } as any,
-  } as any);
+  const privy = new PrivyClient({ appId, appSecret });
 
   const publicClient = createPublicClient({ transport: http(RPC_URL) });
   const decimals = await publicClient.readContract({
@@ -112,12 +120,31 @@ async function main() {
   });
   const unit = (n: number) => BigInt(Math.round(n * 10 ** decimals));
 
-  // --- Step 1: create the embedded wallet ---------------------------------
-  console.log("\n[1/10] Creating Privy embedded wallet...");
-  const wallet = await privy.wallets().create({ chain_type: "ethereum" });
-  const walletId = (wallet as any).id as string;
-  const walletAddress = (wallet as any).address as `0x${string}`;
+  // --- Step 1: create (or reuse) the embedded wallet ----------------------
+  let walletId: string;
+  let walletAddress: `0x${string}`;
+  const reuseWalletId = process.env.KILL_TEST_WALLET_ID;
+  if (reuseWalletId) {
+    console.log("\n[1/10] Reusing existing Privy embedded wallet (KILL_TEST_WALLET_ID set)...");
+    const wallet = await privy.wallets().get(reuseWalletId);
+    walletId = reuseWalletId;
+    walletAddress = (wallet as any).address as `0x${string}`;
+  } else {
+    console.log("\n[1/10] Creating Privy embedded wallet...");
+    const wallet = await privy.wallets().create({ chain_type: "ethereum" });
+    walletId = (wallet as any).id as string;
+    walletAddress = (wallet as any).address as `0x${string}`;
+    console.log("  set KILL_TEST_WALLET_ID in .env to reuse this wallet on future runs.");
+  }
   console.log(`  wallet id=${walletId} address=${walletAddress}`);
+
+  // Establish the wallet's real owner (stand-in for the end user's own key)
+  // so the app's bare credentials stop having implicit default control.
+  // Without this, additional_signers only ever *adds* a permitted path and
+  // revoking it leaves the app's fallback access untouched — which is
+  // exactly the gap the original run of this script surfaced at step 10.
+  console.log("  setting wallet owner to the owner quorum (simulated user key)...");
+  await privy.wallets().update(walletId, { owner_id: ownerQuorumId } as any);
 
   // --- Step 2: fund with test AUSD ----------------------------------------
   console.log("\n[2/10] Fund this wallet with test AUSD, then press enter to continue.");
@@ -136,7 +163,7 @@ async function main() {
     chain_type: "ethereum",
     rules: [
       {
-        name: "Allow AUSD transfer to valid recipient, under cap, before expiry",
+        name: "Allow AUSD transfer, recipient+cap+expiry",
         method: "eth_sendTransaction",
         action: "ALLOW",
         conditions: [
@@ -164,7 +191,8 @@ async function main() {
   console.log(`  policy id=${policyId}, expires ${new Date(expiresAt * 1000).toISOString()}`);
 
   await privy.wallets().update(walletId, {
-    additional_signers: [{ signer_id: quorumId, override_policy_ids: [policyId] }],
+    authorization_context: ownerContext,
+    additional_signers: [{ signer_id: agentQuorumId, override_policy_ids: [policyId] }],
   } as any);
   console.log("  session signer attached with policy.");
 
@@ -175,6 +203,7 @@ async function main() {
       .ethereum()
       .sendTransaction(walletId, {
         caip2: CAIP2,
+        authorization_context: agentContext,
         params: { transaction: { to: AUSD_ADDRESS, data, chain_id: CHAIN_ID } },
       } as any);
   };
@@ -225,7 +254,8 @@ async function main() {
     ],
   } as any);
   await privy.wallets().update(walletId, {
-    additional_signers: [{ signer_id: quorumId, override_policy_ids: [(expiredPolicy as any).id] }],
+    authorization_context: ownerContext,
+    additional_signers: [{ signer_id: agentQuorumId, override_policy_ids: [(expiredPolicy as any).id] }],
   } as any);
   try {
     await sendTransfer(validRecipient, unit(1));
@@ -237,12 +267,13 @@ async function main() {
   // Restore the valid, unexpired policy before the revocation test so step
   // 10's failure is attributable to revocation, not the expired policy.
   await privy.wallets().update(walletId, {
-    additional_signers: [{ signer_id: quorumId, override_policy_ids: [policyId] }],
+    authorization_context: ownerContext,
+    additional_signers: [{ signer_id: agentQuorumId, override_policy_ids: [policyId] }],
   } as any);
 
   // --- Step 9: revoke the session -----------------------------------------
   console.log("\n[9/10] Revoking the session signer...");
-  await privy.wallets().update(walletId, { additional_signers: [] } as any);
+  await privy.wallets().update(walletId, { authorization_context: ownerContext, additional_signers: [] } as any);
   console.log("  session signer removed.");
 
   // --- Step 10: post-revocation transfer -> must fail ----------------------
@@ -270,13 +301,19 @@ async function waitForBalance(
   minAmount: bigint,
 ) {
   for (;;) {
-    const bal = await client.readContract({ address: token, abi: ERC20_ABI, functionName: "balanceOf", args: [owner] });
-    if (bal >= minAmount) {
-      console.log(`  funded: balance=${bal}`);
-      return;
+    try {
+      const bal = await client.readContract({ address: token, abi: ERC20_ABI, functionName: "balanceOf", args: [owner] });
+      if (bal >= minAmount) {
+        console.log(`  funded: balance=${bal}`);
+        return;
+      }
+      console.log("  waiting for funding... (checking every 10s)");
+    } catch (err) {
+      // Public testnet RPC is occasionally slow/rate-limited — a transient
+      // read failure here is not a reason to abort a multi-minute wait.
+      console.log(`  balance check failed (will retry): ${String(err).split("\n")[0]}`);
     }
-    console.log("  waiting for funding... (checking every 5s)");
-    await sleep(5000);
+    await sleep(10000);
   }
 }
 

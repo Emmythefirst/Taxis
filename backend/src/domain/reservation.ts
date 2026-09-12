@@ -21,6 +21,20 @@
  * below is an in-memory stand-in with the same contract (single synchronous
  * critical section per key) so the domain logic and its tests don't need a
  * real database yet.
+ *
+ * **Per-cycle uniqueness (Section A.12, duplicate execution)**: once a
+ * recurring obligation moved from "attach a fresh Privy policy every cycle"
+ * to a durable policy re-consented periodically (see progress.md Build Log,
+ * 2026-09-12 entry on the owner/agent-quorum spike), Privy's enclave lost
+ * any notion of "this specific cycle already ran" — it will happily co-sign
+ * two identically-shaped transactions inside the same still-valid policy
+ * window. There is no on-chain backstop against replaying a cycle_id
+ * anymore, so this store is now the *only* thing enforcing it: a cycle_id
+ * that's already reserved or already settled can never be reserved again,
+ * regardless of whether the cumulative cap would otherwise allow it. A
+ * *released* reservation (a genuine execution failure, not a duplicate
+ * trigger) clears the cycle_id so a legitimate retry stays possible —
+ * settling it does not, since a settled cycle must never pay twice.
  */
 
 export interface PeriodCap {
@@ -31,12 +45,17 @@ export interface PeriodCap {
 
 export type ReservationResult =
   | { ok: true; reservationId: string }
-  | { ok: false; reason: "CAP_EXCEEDED" };
+  | { ok: false; reason: "CAP_EXCEEDED" }
+  | { ok: false; reason: "DUPLICATE_CYCLE" };
 
 export class CumulativeCapStore {
   private periods = new Map<string, PeriodCap>();
   private nextReservationId = 1;
-  private reservations = new Map<string, { key: string; amount: number }>();
+  private reservations = new Map<string, { key: string; amount: number; cycleId: string }>();
+  /** cycle_ids currently reserved (not yet settled or released). */
+  private activeCycles = new Set<string>();
+  /** cycle_ids that have settled — permanently blocked from reservation. */
+  private settledCycles = new Set<string>();
 
   private key(obligationId: string, period: string): string {
     return `${obligationId}:${period}`;
@@ -50,13 +69,17 @@ export class CumulativeCapStore {
   }
 
   /**
-   * Atomic reserve: check-and-increment happen in one synchronous step, so
-   * no other call can interleave between the check and the write (this is
-   * what a single conditional UPDATE guarantees in a real DB under
-   * row-level locking — this in-memory version relies on JS's
+   * Atomic reserve: the duplicate-cycle check, the cap check, and the write
+   * all happen in one synchronous step, so no other call can interleave
+   * between them (this is what a single conditional UPDATE guarantees in a
+   * real DB under row-level locking — this in-memory version relies on JS's
    * run-to-completion semantics for synchronous functions instead).
    */
-  reserve(obligationId: string, period: string, amount: number): ReservationResult {
+  reserve(obligationId: string, period: string, amount: number, cycleId: string): ReservationResult {
+    if (this.activeCycles.has(cycleId) || this.settledCycles.has(cycleId)) {
+      return { ok: false, reason: "DUPLICATE_CYCLE" };
+    }
+
     const key = this.key(obligationId, period);
     const p = this.periods.get(key);
     if (!p) throw new Error(`Period not initialized: ${key}`);
@@ -66,7 +89,8 @@ export class CumulativeCapStore {
     }
     p.reserved += amount;
     const reservationId = `res_${this.nextReservationId++}`;
-    this.reservations.set(reservationId, { key, amount });
+    this.reservations.set(reservationId, { key, amount, cycleId });
+    this.activeCycles.add(cycleId);
     return { ok: true, reservationId };
   }
 
@@ -77,6 +101,8 @@ export class CumulativeCapStore {
     p.reserved -= r.amount;
     p.spent += r.amount;
     this.reservations.delete(reservationId);
+    this.activeCycles.delete(r.cycleId);
+    this.settledCycles.add(r.cycleId);
   }
 
   release(reservationId: string): void {
@@ -85,6 +111,7 @@ export class CumulativeCapStore {
     const p = this.periods.get(r.key)!;
     p.reserved -= r.amount;
     this.reservations.delete(reservationId);
+    this.activeCycles.delete(r.cycleId);
   }
 
   snapshot(obligationId: string, period: string): PeriodCap {

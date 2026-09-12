@@ -63,11 +63,24 @@ export interface Quote {
   recipientAddress: Hex;
   localAmount: number;
   localCurrency: string;
-  ausdAmount: string; // base-unit string (e.g. wei-equivalent for AUSD's decimals)
+  /**
+   * Decimal AUSD amount, human-readable (e.g. "201.5") — NOT base units.
+   * decisionLoop.ts computes this from FX rate + fees, which are naturally
+   * human-scale; it deliberately doesn't know AUSD's on-chain decimals.
+   * The execution layer converts this to base units at send time via
+   * parseDecimalToBaseUnits() (units.ts) — never via float multiplication,
+   * which can misround real money amounts.
+   */
+  ausdAmount: string;
   fxRateLockedAt: string; // ISO timestamp
   fxRate: number; // local currency per 1 AUSD, at lock time
-  feeAgentAusd: string; // base-unit string, itemized
-  feeNetworkAusd: string; // base-unit string, itemized
+  // Decimal AUSD, human-readable (e.g. "1"/"0.5") — same convention as
+  // ausdAmount above, not base units. Itemized: shown separately in the
+  // explainability screen (Section A.11), never bundled into one total.
+  // Not separately transferred on-chain today — ausdAmount already
+  // includes both fees; these fields exist for display/audit.
+  feeAgentAusd: string;
+  feeNetworkAusd: string;
   /** Unique per cycle — guarantees a quote can never execute twice. */
   nonce: string;
   issuedAt: string;

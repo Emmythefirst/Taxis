@@ -1,0 +1,32 @@
+{
+  "name": "@taxis/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "privy:kill-test": "tsx scripts/privy-kill-test.ts",
+    "privy:fund-ausd": "tsx scripts/privy-fund-ausd.ts",
+    "privy:recurring-spike": "tsx scripts/privy-recurring-policy-spike.ts",
+    "privy:policy-auth-spike": "tsx scripts/privy-policy-update-auth-spike.ts",
+    "quote-engine:e2e": "tsx scripts/quote-engine-e2e.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@privy-io/node": "^0.2.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
+  }
+}

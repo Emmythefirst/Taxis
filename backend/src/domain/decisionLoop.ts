@@ -66,12 +66,19 @@ export function runDecisionLoop(
   const withinFeeCeiling = inputs.feeAgentAusd + inputs.feeNetworkAusd <= envelope.maxFeeAusd;
   const withinTolerance = withinFxCeiling && withinFeeCeiling;
 
-  // Step 7: atomically reserve the cumulative-cap allocation.
+  // Step 7: atomically reserve the cumulative-cap allocation. Also the sole
+  // duplicate-execution guard (Section A.12) now that a recurring
+  // obligation's Privy policy is durable rather than reattached fresh per
+  // cycle — see reservation.ts header for why this can no longer rely on
+  // any on-chain backstop.
   deps.capStore.initPeriod(envelope.id, inputs.period, envelope.cumulativeCapAusd);
-  const reservation = deps.capStore.reserve(envelope.id, inputs.period, totalAusd);
+  const reservation = deps.capStore.reserve(envelope.id, inputs.period, totalAusd, cycle.id);
   if (!reservation.ok) {
     const skipped = transitionCycle(cycle, "SKIPPED", {
-      reason: "Cumulative spending cap reservation failed for this period",
+      reason:
+        reservation.reason === "DUPLICATE_CYCLE"
+          ? "This cycle already has a reservation or has settled — refusing to execute it twice"
+          : "Cumulative spending cap reservation failed for this period",
       at: now.toISOString(),
     });
     return { outcome: "SKIPPED", cycle: skipped, reason: skipped.reason! };
