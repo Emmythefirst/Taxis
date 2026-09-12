@@ -1,0 +1,26 @@
+{
+  "name": "taxis",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "privy:kill-test": "tsx scripts/privy-kill-test.ts"
+  },
+  "dependencies": {
+    "@privy-io/node": "^0.2.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
+  }
+}

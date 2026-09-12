@@ -1,0 +1,7 @@
+progress.md
+node_modules/
+.env
+.env.local
+!.env.example
+dist/
+build/
