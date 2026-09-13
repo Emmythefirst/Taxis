@@ -46,6 +46,14 @@ export interface ObligationEnvelope {
   quoteExpirySeconds: number;
   status: "ACTIVE" | "PAUSED" | "CANCELLED";
   createdAt: string;
+  /**
+   * Dead-man's-switch continuity target (Section A.8) — the recipient
+   * obligations redirect to on sustained user inactivity. Optional: not
+   * every obligation opts into continuity. Setting this alone authorizes
+   * nothing — redirection also requires a separate, independently-renewed
+   * CONTINUITY-kind grant to actually exist (see persistence/grants.ts).
+   */
+  backupRecipientId?: string;
 }
 
 export type Cadence =
@@ -86,6 +94,51 @@ export interface Quote {
   issuedAt: string;
   expiresAt: string;
   signature?: Hex;
+}
+
+/**
+ * A signed, expiring quote for a one-off merchant checkout (Section A.2 —
+ * committed scope regardless of milestone sequencing). Deliberately
+ * separate from `Quote`: checkout has no cadence, no cumulative-cap period,
+ * and no pre-existing recipient allowlist entry — the live "Approve
+ * payment" tap at purchase time (Section A.6) IS the authorization for
+ * that specific merchant address, each time, rather than a durable grant.
+ */
+export interface CheckoutQuote {
+  checkoutId: string;
+  merchantAddress: Hex;
+  localAmount: number;
+  localCurrency: string;
+  /** Decimal AUSD, human-readable — same convention as Quote.ausdAmount. */
+  ausdAmount: string;
+  fxRateLockedAt: string;
+  fxRate: number;
+  feeAgentAusd: string;
+  feeNetworkAusd: string;
+  nonce: string;
+  issuedAt: string;
+  expiresAt: string;
+  signature?: Hex;
+}
+
+export const CHECKOUT_STATUSES = [
+  "PENDING_APPROVAL",
+  "SETTLED",
+  "FAILED",
+  "EXPIRED",
+] as const;
+export type CheckoutStatus = (typeof CHECKOUT_STATUSES)[number];
+
+export interface Checkout {
+  id: string;
+  userId: string;
+  merchantAddress: Hex;
+  status: CheckoutStatus;
+  quote: CheckoutQuote;
+  reason?: string;
+  txHash?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const CYCLE_STATES = [

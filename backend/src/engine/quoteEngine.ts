@@ -13,7 +13,7 @@
 
 import { transitionCycle } from "../domain/cycleStateMachine.js";
 import { runDecisionLoop, type DecisionDeps, type QuoteInputs } from "../domain/decisionLoop.js";
-import type { CumulativeCapStore } from "../domain/reservation.js";
+import type { CapStore } from "../domain/reservation.js";
 import type { Cycle, Hex, ObligationEnvelope, Quote, Recipient } from "../domain/types.js";
 import { parseDecimalToBaseUnits } from "../domain/units.js";
 import { signQuote } from "../quoting/signing.js";
@@ -27,7 +27,7 @@ export interface TransferExecutor {
 }
 
 export interface QuoteEngineDeps {
-  capStore: CumulativeCapStore;
+  capStore: CapStore;
   now: () => Date;
   makeNonce: () => string;
   quoteSigningPrivateKey: Hex;

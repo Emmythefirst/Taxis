@@ -48,7 +48,22 @@ export type ReservationResult =
   | { ok: false; reason: "CAP_EXCEEDED" }
   | { ok: false; reason: "DUPLICATE_CYCLE" };
 
-export class CumulativeCapStore {
+/**
+ * The contract decisionLoop.ts/quoteEngine.ts actually depend on — kept
+ * separate from CumulativeCapStore so production code can be handed a real
+ * SQL-backed implementation (persistence/sqliteCapStore.ts) without either
+ * side needing to know about the other. Tests keep using the in-memory
+ * class directly; it implements this interface too.
+ */
+export interface CapStore {
+  initPeriod(obligationId: string, period: string, cap: number): void;
+  reserve(obligationId: string, period: string, amount: number, cycleId: string): ReservationResult;
+  settle(reservationId: string): void;
+  release(reservationId: string): void;
+  snapshot(obligationId: string, period: string): PeriodCap;
+}
+
+export class CumulativeCapStore implements CapStore {
   private periods = new Map<string, PeriodCap>();
   private nextReservationId = 1;
   private reservations = new Map<string, { key: string; amount: number; cycleId: string }>();

@@ -1,0 +1,4 @@
+{
+  "schedule": "*/30 * * * * *",
+  "backendUrl": "http://localhost:8787/cre/trigger-check"
+}

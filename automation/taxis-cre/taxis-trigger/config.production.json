@@ -1,0 +1,4 @@
+{
+  "schedule": "*/30 * * * * *",
+  "backendUrl": "https://REPLACE_WITH_PUBLIC_TAXIS_BACKEND_URL/cre/trigger-check"
+}

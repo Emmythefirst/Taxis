@@ -14,16 +14,22 @@
     "privy:fund-ausd": "tsx scripts/privy-fund-ausd.ts",
     "privy:recurring-spike": "tsx scripts/privy-recurring-policy-spike.ts",
     "privy:policy-auth-spike": "tsx scripts/privy-policy-update-auth-spike.ts",
-    "quote-engine:e2e": "tsx scripts/quote-engine-e2e.ts"
+    "quote-engine:e2e": "tsx scripts/quote-engine-e2e.ts",
+    "scheduler:e2e": "tsx scripts/scheduler-e2e.ts",
+    "checkout:e2e": "tsx scripts/checkout-e2e.ts",
+    "dms:e2e": "tsx scripts/dead-man-switch-e2e.ts",
+    "server": "tsx src/server.ts"
   },
   "dependencies": {
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.8.0",
     "@privy-io/node": "^0.2.0",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.5",
     "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20.14.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",

@@ -1,4 +1,4 @@
-import { CumulativeCapStore } from "./reservation.js";
+import type { CapStore } from "./reservation.js";
 import { transitionCycle } from "./cycleStateMachine.js";
 import type { Cycle, ObligationEnvelope, Quote, Recipient } from "./types.js";
 
@@ -18,7 +18,7 @@ export interface QuoteInputs {
 }
 
 export interface DecisionDeps {
-  capStore: CumulativeCapStore;
+  capStore: CapStore;
   now: () => Date;
   sign: (quote: Omit<Quote, "signature">) => string;
   makeNonce: () => string;

@@ -6,3 +6,8 @@ node_modules/
 keys/
 dist/
 build/
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
