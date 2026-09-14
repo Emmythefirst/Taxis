@@ -55,6 +55,27 @@ export function getCheckoutPolicyId(db: Database.Database, id: string): string |
   return row?.policy_id;
 }
 
+/**
+ * Checkouts still awaiting the owner-signed approve tap — these need a live
+ * rule in the shared operations policy (engine/operationsPolicy.ts) exactly
+ * like an active CYCLE grant does, since checkout attaches to the same
+ * agent signer (privy/policy.ts's header). No expiry filter beyond status:
+ * an expired-but-still-PENDING_APPROVAL checkout's rule is harmless to
+ * include (Privy already refuses it past expiry) and excluding it here
+ * would just mean one more rebuild once it's next touched.
+ */
+export function listPendingCheckoutsForUser(db: Database.Database, userId: string): Checkout[] {
+  const rows = db
+    .prepare(`SELECT * FROM checkouts WHERE user_id = ? AND status = 'PENDING_APPROVAL' ORDER BY created_at`)
+    .all(userId) as CheckoutRow[];
+  return rows.map(rowToCheckout);
+}
+
+export function listCheckoutsForUser(db: Database.Database, userId: string): Checkout[] {
+  const rows = db.prepare(`SELECT * FROM checkouts WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as CheckoutRow[];
+  return rows.map(rowToCheckout);
+}
+
 export function updateCheckoutStatus(
   db: Database.Database,
   id: string,

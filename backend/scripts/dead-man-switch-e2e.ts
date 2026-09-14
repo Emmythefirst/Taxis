@@ -26,7 +26,7 @@ import { ERC20_ABI } from "../src/privy/erc20.js";
 import { createGrantPolicy } from "../src/privy/policy.js";
 import { createPrivyTransferExecutor } from "../src/privy/execute.js";
 import { openDb } from "../src/persistence/db.js";
-import { insertUser, touchUserActivity } from "../src/persistence/users.js";
+import { insertUser, setUserWallet, touchUserActivity } from "../src/persistence/users.js";
 import { insertRecipient } from "../src/persistence/recipients.js";
 import { insertObligation } from "../src/persistence/obligations.js";
 import { recordGrant } from "../src/persistence/grants.js";
@@ -116,6 +116,7 @@ async function main() {
   const wellPastThreshold = new Date(Date.now() - (inactivityThresholdDays + 30) * 24 * 60 * 60 * 1000);
 
   insertUser(db, "user_demo");
+  setUserWallet(db, "user_demo", walletId, walletAddress);
   touchUserActivity(db, "user_demo", wellPastThreshold); // genuinely inactive
   console.log(`\nUser last active: ${wellPastThreshold.toISOString()} (${inactivityThresholdDays + 30} days ago > ${inactivityThresholdDays}-day threshold)`);
 
@@ -162,10 +163,16 @@ async function main() {
   console.log(`Seeded obligation ${obligation.id} with backup recipient and both grants recorded.`);
 
   // --- Run the real scheduler with continuity configured -------------------
-  const cycleExecutor = createPrivyTransferExecutor(privy, { walletId, ausdAddress, chainId, agentPrivateKeyB64, publicClient });
-  const continuityExecutor = createPrivyTransferExecutor(privy, { walletId, ausdAddress, chainId, agentPrivateKeyB64: continuityPrivateKeyB64, publicClient });
-  const getAvailableBalanceAusd = async () => {
-    const balance = await publicClient.readContract({ address: ausdAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [walletAddress] });
+  const executorFor = (resolvedWalletId: string, kind: "CYCLE" | "CONTINUITY") =>
+    createPrivyTransferExecutor(privy, {
+      walletId: resolvedWalletId,
+      ausdAddress,
+      chainId,
+      agentPrivateKeyB64: kind === "CONTINUITY" ? continuityPrivateKeyB64 : agentPrivateKeyB64,
+      publicClient,
+    });
+  const getAvailableBalanceAusd = async (address: string) => {
+    const balance = await publicClient.readContract({ address: ausdAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address as `0x${string}`] });
     return Number(formatBaseUnitsToDecimal(balance, ausdDecimals));
   };
 
@@ -176,9 +183,9 @@ async function main() {
     market: staticMarketDataProvider(),
     quoteSigningPrivateKey,
     ausdDecimals,
-    executor: cycleExecutor,
+    executorFor,
     getAvailableBalanceAusd,
-    continuity: { inactivityThresholdDays, executor: continuityExecutor },
+    continuity: { inactivityThresholdDays },
   });
 
   console.log(`\n${results.length} due cycle(s) processed:`);

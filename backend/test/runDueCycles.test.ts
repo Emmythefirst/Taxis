@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { openDb } from "../src/persistence/db.js";
-import { insertUser, touchUserActivity } from "../src/persistence/users.js";
+import { insertUser, setUserWallet, touchUserActivity } from "../src/persistence/users.js";
 import { insertRecipient } from "../src/persistence/recipients.js";
 import { insertObligation, setBackupRecipient } from "../src/persistence/obligations.js";
 import { recordGrant } from "../src/persistence/grants.js";
@@ -17,6 +17,7 @@ let db: Database.Database;
 beforeEach(() => {
   db = openDb(":memory:");
   insertUser(db, "user_1");
+  setUserWallet(db, "user_1", "wallet_1", "0x00000000000000000000000000000000000ee1");
 });
 
 function seedObligation(overrides: Partial<ObligationEnvelope> = {}): void {
@@ -69,7 +70,7 @@ function makeDeps(executor: TransferExecutor, availableBalanceAusd = 5000): RunD
     market,
     quoteSigningPrivateKey: QUOTE_SIGNING_PRIVATE_KEY,
     ausdDecimals: 6,
-    executor,
+    executorFor: () => executor,
     getAvailableBalanceAusd: async () => availableBalanceAusd,
   };
 }
@@ -123,6 +124,18 @@ describe("runDueCycles", () => {
     expect(executor.calls).toHaveLength(0);
   });
 
+  it("leaves a due cycle untouched when its owner has no wallet linked yet", async () => {
+    db = openDb(":memory:");
+    insertUser(db, "user_1"); // deliberately no setUserWallet() call
+    seedObligation({ createdAt: "2026-01-01T00:00:00.000Z" });
+    const executor = new FakeExecutor();
+
+    const results = await runDueCycles(makeDeps(executor));
+
+    expect(results).toHaveLength(0);
+    expect(executor.calls).toHaveLength(0);
+  });
+
   it("does not re-process the same cycle on a second call in the same period", async () => {
     seedObligation({ createdAt: "2026-01-01T00:00:00.000Z" });
     const executor = new FakeExecutor();
@@ -153,7 +166,8 @@ describe("runDueCycles — dead-man's-switch redirection", () => {
   function makeDepsWithContinuity(cycleExecutor: TransferExecutor, continuityExecutor: TransferExecutor): RunDueCyclesDeps {
     return {
       ...makeDeps(cycleExecutor),
-      continuity: { inactivityThresholdDays: 90, executor: continuityExecutor },
+      executorFor: (_walletId, kind) => (kind === "CONTINUITY" ? continuityExecutor : cycleExecutor),
+      continuity: { inactivityThresholdDays: 90 },
     };
   }
 

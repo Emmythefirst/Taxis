@@ -3,11 +3,27 @@
 -- that don't map cleanly to flat SQL columns.
 
 CREATE TABLE IF NOT EXISTS users (
+  -- This IS the Privy user id (usePrivy().user.id client-side) — not a
+  -- separate app-generated id. There is exactly one Privy identity per
+  -- Taxis user, so a second id column would only be a redundant mapping
+  -- to keep in sync.
   id TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
   -- Dead-man's-switch input (Section A.8). Updated on an explicit check-in
   -- or a routine grant renewal — either is a valid proof-of-life signal.
-  last_active_at TEXT
+  last_active_at TEXT,
+  -- Resolved server-side from Privy (privy/walletLookup.ts) via /users/sync,
+  -- never trusted from client input — this is what lets execution code
+  -- (runDueCycles, checkoutEngine) act on THIS user's own embedded wallet
+  -- instead of a single hardcoded demo wallet. Both null until the first
+  -- successful sync.
+  wallet_id TEXT,
+  wallet_address TEXT,
+  -- Dead-man's-switch (Section A.8) inactivity threshold, chosen by the
+  -- user during continuity setup (the design's 30/60/90-day chips) — NULL
+  -- until they've set it up, in which case runDueCycles falls back to the
+  -- server-wide DEAD_MAN_SWITCH_INACTIVITY_DAYS default.
+  continuity_inactivity_days INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS recipients (

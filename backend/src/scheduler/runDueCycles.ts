@@ -21,14 +21,16 @@
  *    fake. Do not ship a real remittance product on this; do use it to
  *    prove the scheduling/execution wiring works.
  *
- * 2. **One global demo wallet for every obligation.** There is no
- *    per-user/per-obligation wallet-linkage table yet (real per-user
- *    wallets need real Privy client-side login first, see progress.md's
- *    ownership-model spike). `getAvailableBalanceAusd` and `executor` are
- *    both bound to a single wallet by the caller; every obligation this
- *    processes executes against it. Must be replaced with a real
- *    per-obligation wallet lookup once multi-user wallets exist. The same
- *    limitation applies to `continuity.executor` below.
+ * 2. **Resolved per real user wallet, not one global demo wallet.** Each
+ *    obligation's owner has their own embedded wallet, linked via
+ *    /users/sync (privy/walletLookup.ts) into users.wallet_id/wallet_address.
+ *    `executorFor`/`getAvailableBalanceAusd` are therefore factories keyed
+ *    by wallet, not fixed values — see server.ts's tryBuildLiveExecutionDeps
+ *    for how they're constructed. A cycle whose owner hasn't linked a
+ *    wallet yet (sync never ran, or ran before their embedded wallet
+ *    finished provisioning) is left untouched this pass, same as the
+ *    missing-obligation/recipient case below — it's simply not yet safe to
+ *    act on, not a batch-ending error.
  *
  * Safety note this DOES rely on genuinely: it is only safe to let a 30s-
  * interval CRE cron call this repeatedly because generateDueCycles() only
@@ -42,7 +44,9 @@
  * inactivity, and an ACTIVE CONTINUITY-kind grant, this cycle's payment
  * goes to the backup recipient via the separate continuity executor
  * instead of the primary recipient/executor — never partially (all three
- * conditions must hold, or the normal path runs unchanged).
+ * conditions must hold, or the normal path runs unchanged). Both paths
+ * still execute from the SAME wallet (it's still that user's own funds) —
+ * only which agent key signs, and which recipient receives, changes.
  *
  * Deliberately does NOT modify domain/decisionLoop.ts's allowlist gate to
  * special-case this: that gate simply checks the given recipient matches
@@ -63,12 +67,14 @@ import { getRecipient } from "../persistence/recipients.js";
 import { listDueCycles, saveCycle } from "../persistence/cycles.js";
 import { SqliteCapStore } from "../persistence/sqliteCapStore.js";
 import { getActiveGrant } from "../persistence/grants.js";
-import { isUserInactive } from "../persistence/users.js";
+import { getUser, isUserInactive } from "../persistence/users.js";
 import { generateDueCycles } from "./generateDueCycles.js";
 import type { Hex } from "../domain/types.js";
 import { staticMarketDataProvider, type MarketDataProvider } from "../pricing/marketData.js";
 
 export { staticMarketDataProvider, type MarketDataProvider };
+
+export type GrantKind = "CYCLE" | "CONTINUITY";
 
 export interface RunDueCyclesDeps {
   db: Database.Database;
@@ -76,14 +82,16 @@ export interface RunDueCyclesDeps {
   market: MarketDataProvider;
   quoteSigningPrivateKey: Hex;
   ausdDecimals: number;
-  executor: TransferExecutor;
-  /** Re-read before each cycle, not once per batch — see file header. */
-  getAvailableBalanceAusd: () => Promise<number>;
+  /** Built per-wallet, not once — see file header point 2. `kind` selects
+   *  which agent key signs (the everyday agent key, or the separate
+   *  continuity key), never which wallet. */
+  executorFor: (walletId: string, kind: GrantKind) => TransferExecutor;
+  /** Re-read per wallet, not once per batch — see file header. */
+  getAvailableBalanceAusd: (walletAddress: string) => Promise<number>;
   /** Dead-man's-switch (Section A.8). Omit entirely to disable continuity
-   *  redirection — never partially applied without both fields present. */
+   *  redirection. */
   continuity?: {
     inactivityThresholdDays: number;
-    executor: TransferExecutor;
   };
 }
 
@@ -111,21 +119,34 @@ export async function runDueCycles(deps: RunDueCyclesDeps): Promise<DueCycleResu
       continue;
     }
 
+    const owner = getUser(deps.db, obligation.userId);
+    if (!owner?.walletId || !owner.walletAddress) {
+      // No wallet linked for this user yet (sync never ran, or their
+      // embedded wallet hasn't finished provisioning) — nothing safe to
+      // execute against. Leave the cycle due; it's picked up once linked.
+      continue;
+    }
+
     let effectiveEnvelope = obligation;
-    let executor = deps.executor;
+    let kind: GrantKind = "CYCLE";
 
     if (deps.continuity && obligation.backupRecipientId) {
-      const inactive = isUserInactive(deps.db, obligation.userId, deps.continuity.inactivityThresholdDays, now);
+      // The user's own choice (Section A.8's 30/60/90-day chips), set
+      // during continuity setup — falls back to the server-wide default
+      // only if they've never actually configured it.
+      const thresholdDays = owner.continuityInactivityDays ?? deps.continuity.inactivityThresholdDays;
+      const inactive = isUserInactive(deps.db, obligation.userId, thresholdDays, now);
       const continuityGrant = inactive ? getActiveGrant(deps.db, obligation.id, "CONTINUITY") : undefined;
       const backupRecipient = continuityGrant ? getRecipient(deps.db, obligation.backupRecipientId) : undefined;
       if (inactive && continuityGrant && backupRecipient) {
         recipient = backupRecipient;
         effectiveEnvelope = { ...obligation, recipientId: backupRecipient.id };
-        executor = deps.continuity.executor;
+        kind = "CONTINUITY";
       }
     }
 
-    const availableBalanceAusd = await deps.getAvailableBalanceAusd();
+    const executor = deps.executorFor(owner.walletId, kind);
+    const availableBalanceAusd = await deps.getAvailableBalanceAusd(owner.walletAddress);
     const fees = deps.market.getFees();
     const inputs: QuoteInputs = {
       fxRate: deps.market.getFxRate(effectiveEnvelope.localCurrency),

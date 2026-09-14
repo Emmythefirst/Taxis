@@ -24,7 +24,7 @@ import { buildCheckoutQuote, type CheckoutQuoteInputs } from "../domain/checkout
 import { parseDecimalToBaseUnits } from "../domain/units.js";
 import type { Checkout, Hex } from "../domain/types.js";
 import { signQuote } from "../quoting/signing.js";
-import { createGrantPolicy } from "../privy/policy.js";
+import { rebuildOperationsPolicy } from "./operationsPolicy.js";
 import type { TransferExecutor } from "./quoteEngine.js";
 import { getCheckout, insertCheckout, updateCheckoutStatus } from "../persistence/checkouts.js";
 import type Database from "better-sqlite3";
@@ -81,23 +81,31 @@ export async function createCheckout(deps: CreateCheckoutDeps, params: CreateChe
 
   const amountBaseUnits = parseDecimalToBaseUnits(result.quote.ausdAmount, deps.ausdDecimals);
   const expiresAtUnix = Math.floor(new Date(result.quote.expiresAt).getTime() / 1000);
-  const grant = await createGrantPolicy(deps.privy, {
-    ausdAddress: deps.ausdAddress,
-    recipientAddress: params.merchantAddress,
-    maxAmountBaseUnits: amountBaseUnits,
-    expiresAtUnix,
-    label: `Checkout ${checkoutId}`.slice(0, 49),
-  });
+
+  // Checkout shares the same agent signer as recurring obligations, so its
+  // rule must fold into the ONE combined policy that signer can hold — see
+  // operationsPolicy.ts's header for why a standalone policy per checkout
+  // is no longer possible.
+  const { policyId } = await rebuildOperationsPolicy(
+    { db: deps.db, privy: deps.privy, ausdAddress: deps.ausdAddress, ausdDecimals: deps.ausdDecimals },
+    params.userId,
+    {
+      label: `Checkout ${checkoutId}`,
+      recipientAddress: params.merchantAddress,
+      maxAmountBaseUnits: amountBaseUnits,
+      expiresAtUnix,
+    },
+  );
 
   const checkout = insertCheckout(deps.db, {
     id: checkoutId,
     userId: params.userId,
     merchantAddress: params.merchantAddress,
     quote: result.quote,
-    policyId: grant.policyId,
+    policyId,
   });
 
-  return { outcome: "QUOTED", checkout, policyId: grant.policyId };
+  return { outcome: "QUOTED", checkout, policyId };
 }
 
 export interface ExecuteCheckoutDeps {

@@ -31,5 +31,21 @@ export function openDb(path: string = process.env.TAXIS_DB_PATH ?? "./data/taxis
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(readFileSync(SCHEMA_PATH, "utf-8"));
+  migrate(db);
   return db;
+}
+
+/**
+ * `CREATE TABLE IF NOT EXISTS` only ever applies to a genuinely new table —
+ * it does nothing for a column added to schema.sql after a real database
+ * file already exists (e.g. this project's own dev data/taxis.db, holding
+ * a real logged-in user's row from before continuity_inactivity_days
+ * existed). No migration framework for a project this size; just an
+ * idempotent "add the column if it isn't there yet" check per addition.
+ */
+function migrate(db: Database.Database): void {
+  const userColumns = db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>;
+  if (!userColumns.some((c) => c.name === "continuity_inactivity_days")) {
+    db.exec(`ALTER TABLE users ADD COLUMN continuity_inactivity_days INTEGER`);
+  }
 }

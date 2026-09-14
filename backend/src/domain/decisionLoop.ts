@@ -85,6 +85,27 @@ export function runDecisionLoop(
   }
 
   // Step 8: generate and sign the quote (recipient, amount, fee, expiry, nonce).
+  //
+  // `.toFixed(6)`, not `.toString()`: targetLocalAmount / fxRate is plain
+  // float division and can produce far more fractional digits than any
+  // real currency needs (e.g. 300000/1300 = 230.76923076923077). units.ts's
+  // parseDecimalToBaseUnits() correctly REJECTS a decimal string with more
+  // fractional digits than the token's own decimals — that guard exists
+  // for exactly this kind of unrounded amount, and this quote's amount
+  // does eventually get parsed there at execution time (runCycle /
+  // approveCycle).
+  //
+  // KNOWN COUPLING, not fully chain-agnostic despite this module's own
+  // design goal: 6 happens to equal AUSD's real decimals today, which is
+  // why this fixes the bug in practice, but it's a coincidence, not a
+  // guarantee. A token with FEWER than 6 decimals would hit the exact same
+  // rejection from the other direction (too many fractional digits for
+  // ITS precision) — this constant would need to become an explicit,
+  // passed-in value (or the minimum of a set of safe defaults) before this
+  // module could honestly claim not to know anything about the settlement
+  // token. Not fixed now: AUSD is the only token this project settles in,
+  // and over-generalizing for a hypothetical second token isn't worth the
+  // complexity yet — flagged here so it isn't forgotten if that changes.
   const expiresAt = new Date(now.getTime() + envelope.quoteExpirySeconds * 1000).toISOString();
   const unsigned: Omit<Quote, "signature"> = {
     obligationId: envelope.id,
@@ -92,11 +113,11 @@ export function runDecisionLoop(
     recipientAddress: recipient.payoutAddress,
     localAmount: envelope.targetLocalAmount,
     localCurrency: envelope.localCurrency,
-    ausdAmount: totalAusd.toString(),
+    ausdAmount: totalAusd.toFixed(6),
     fxRateLockedAt: now.toISOString(),
     fxRate: inputs.fxRate,
-    feeAgentAusd: inputs.feeAgentAusd.toString(),
-    feeNetworkAusd: inputs.feeNetworkAusd.toString(),
+    feeAgentAusd: inputs.feeAgentAusd.toFixed(6),
+    feeNetworkAusd: inputs.feeNetworkAusd.toFixed(6),
     nonce: deps.makeNonce(),
     issuedAt: now.toISOString(),
     expiresAt,

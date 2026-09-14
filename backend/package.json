@@ -14,6 +14,8 @@
     "privy:fund-ausd": "tsx scripts/privy-fund-ausd.ts",
     "privy:recurring-spike": "tsx scripts/privy-recurring-policy-spike.ts",
     "privy:policy-auth-spike": "tsx scripts/privy-policy-update-auth-spike.ts",
+    "privy:multi-policy-spike": "tsx scripts/privy-multi-policy-spike.ts",
+    "privy:combined-policy-spike": "tsx scripts/privy-combined-policy-spike.ts",
     "quote-engine:e2e": "tsx scripts/quote-engine-e2e.ts",
     "scheduler:e2e": "tsx scripts/scheduler-e2e.ts",
     "checkout:e2e": "tsx scripts/checkout-e2e.ts",

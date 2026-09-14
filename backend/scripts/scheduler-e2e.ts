@@ -21,7 +21,7 @@ import { ERC20_ABI } from "../src/privy/erc20.js";
 import { createGrantPolicy } from "../src/privy/policy.js";
 import { createPrivyTransferExecutor } from "../src/privy/execute.js";
 import { openDb } from "../src/persistence/db.js";
-import { insertUser } from "../src/persistence/users.js";
+import { insertUser, setUserWallet } from "../src/persistence/users.js";
 import { insertRecipient } from "../src/persistence/recipients.js";
 import { insertObligation } from "../src/persistence/obligations.js";
 import { getCycle } from "../src/persistence/cycles.js";
@@ -90,6 +90,7 @@ async function main() {
   const anchorWeekday = eightDaysAgo.getUTCDay();
 
   insertUser(db, "user_demo");
+  setUserWallet(db, "user_demo", walletId, walletAddress);
   const recipient: Recipient = {
     id: "rcp_demo",
     userId: "user_demo",
@@ -120,13 +121,14 @@ async function main() {
   console.log(`\nSeeded obligation ${obligation.id}, created ${obligation.createdAt} (due immediately).`);
 
   // --- Run the real scheduler, exactly as /cre/trigger-check would -------
-  const executor = createPrivyTransferExecutor(privy, { walletId, ausdAddress, chainId, agentPrivateKeyB64, publicClient });
-  const getAvailableBalanceAusd = async () => {
+  const executorFor = (resolvedWalletId: string) =>
+    createPrivyTransferExecutor(privy, { walletId: resolvedWalletId, ausdAddress, chainId, agentPrivateKeyB64, publicClient });
+  const getAvailableBalanceAusd = async (walletAddressArg: string) => {
     const balance = await publicClient.readContract({
       address: ausdAddress,
       abi: ERC20_ABI,
       functionName: "balanceOf",
-      args: [walletAddress],
+      args: [walletAddressArg as `0x${string}`],
     });
     return Number(formatBaseUnitsToDecimal(balance, ausdDecimals));
   };
@@ -138,7 +140,7 @@ async function main() {
     market: staticMarketDataProvider(),
     quoteSigningPrivateKey,
     ausdDecimals,
-    executor,
+    executorFor,
     getAvailableBalanceAusd,
   });
 

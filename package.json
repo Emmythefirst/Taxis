@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "backend"
+    "backend",
+    "frontend"
   ],
   "scripts": {
     "test": "npm run test --workspace=backend",
-    "typecheck": "npm run typecheck --workspace=backend"
+    "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
+    "dev:frontend": "npm run dev --workspace=frontend"
   }
 }

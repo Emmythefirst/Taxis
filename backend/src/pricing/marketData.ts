@@ -20,7 +20,11 @@ export function staticMarketDataProvider(): MarketDataProvider {
   const feeAgentAusd = Number(process.env.DEMO_FEE_AGENT_AUSD ?? "1");
   const feeNetworkAusd = Number(process.env.DEMO_FEE_NETWORK_AUSD ?? "0.5");
   return {
-    getFxRate: () => fxRate,
+    // "USD"/"AUSD" merchants (e.g. the checkout demo screen's same-currency
+    // purchase) settle 1:1 — no cross-border FX conversion applies. Every
+    // other currency uses the single flat placeholder rate (see file
+    // header: not a real per-currency FX source).
+    getFxRate: (localCurrency) => (localCurrency === "USD" || localCurrency === "AUSD" ? 1 : fxRate),
     getFees: () => ({ agentAusd: feeAgentAusd, networkAusd: feeNetworkAusd }),
   };
 }
