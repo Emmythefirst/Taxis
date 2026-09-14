@@ -43,6 +43,12 @@ export function Settings() {
   const activeObligations = obligations.filter((o) => o.status === "ACTIVE");
   const recipientById = new Map(recipients.map((r) => [r.id, r]));
   const backupRecipient = continuity?.backupRecipientId ? recipientById.get(continuity.backupRecipientId) : undefined;
+  // Continuity applies to whichever obligations were ACTIVE the moment it
+  // was last set up (or re-run) — a payment created afterward doesn't
+  // retroactively inherit it (no silent reattach without a fresh
+  // owner-signed tap). Surface that gap rather than let it go unnoticed:
+  // re-running setup already re-covers everything current in one tap.
+  const uncoveredObligations = continuity?.configured ? activeObligations.filter((o) => !o.backupRecipientId) : [];
 
   function activeCycleGrantFor(obligationId: string) {
     return grants
@@ -104,6 +110,13 @@ export function Settings() {
         >
           {continuity?.configured ? "Change backup recipient" : "Set up backup recipient"}
         </button>
+        {uncoveredObligations.length > 0 && (
+          <p style={{ marginTop: 14, fontSize: 12.5, color: theme.warn, lineHeight: 1.5 }}>
+            {uncoveredObligations.length} payment{uncoveredObligations.length === 1 ? "" : "s"} added since your last continuity setup{" "}
+            {uncoveredObligations.length === 1 ? "isn't" : "aren't"} covered yet — re-run setup above to include{" "}
+            {uncoveredObligations.length === 1 ? "it" : "them"}.
+          </p>
+        )}
       </div>
 
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 22, marginBottom: 20 }}>

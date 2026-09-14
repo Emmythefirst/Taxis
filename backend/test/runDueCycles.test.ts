@@ -72,6 +72,9 @@ function makeDeps(executor: TransferExecutor, availableBalanceAusd = 5000): RunD
     ausdDecimals: 6,
     executorFor: () => executor,
     getAvailableBalanceAusd: async () => availableBalanceAusd,
+    // Not what this suite exercises — see reconcilePendingCycles.test.ts —
+    // so nothing here ever leaves a cycle stuck without a receipt anyway.
+    checkReceipt: async () => ({ confirmed: false, reverted: false }),
   };
 }
 

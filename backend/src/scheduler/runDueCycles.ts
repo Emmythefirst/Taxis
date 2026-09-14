@@ -1,7 +1,8 @@
 /**
- * The actual automation loop: generate any newly-due cycles, then run every
- * due cycle through the real quote engine (real signed quote, real Privy
- * execution, real on-chain confirmation) — not just list them.
+ * The actual automation loop: reconcile any cycle stuck without a resolved
+ * receipt, generate any newly-due cycles, then run every due cycle through
+ * the real quote engine (real signed quote, real Privy execution, real
+ * on-chain confirmation) — not just list them.
  *
  * Depends on an already-constructed `TransferExecutor` and a balance-
  * reading function, not raw Privy/viem objects — same separation
@@ -10,6 +11,13 @@
  * instead of needing a real Privy client just to exercise the scheduling
  * logic. server.ts's tryBuildLiveExecutionDeps() constructs the real
  * versions.
+ *
+ * **Reconciliation (closed 2026-09-14):** a cycle that reached
+ * PENDING_CONFIRMATION previously just sat in EXECUTING forever — nothing
+ * ever re-asked whether its receipt had landed. For a project whose pitch
+ * is "the agent proves what it did," a cycle silently stuck in limbo was
+ * the one failure mode that directly contradicted that promise. See
+ * scheduler/reconcilePendingCycles.ts.
  *
  * Two honest scope limitations, not silently glossed over:
  *
@@ -69,7 +77,9 @@ import { SqliteCapStore } from "../persistence/sqliteCapStore.js";
 import { getActiveGrant } from "../persistence/grants.js";
 import { getUser, isUserInactive } from "../persistence/users.js";
 import { generateDueCycles } from "./generateDueCycles.js";
+import { reconcilePendingCycles, type ReconcileOutcome } from "./reconcilePendingCycles.js";
 import type { Hex } from "../domain/types.js";
+import type { ReceiptCheckResult } from "../privy/execute.js";
 import { staticMarketDataProvider, type MarketDataProvider } from "../pricing/marketData.js";
 
 export { staticMarketDataProvider, type MarketDataProvider };
@@ -93,6 +103,15 @@ export interface RunDueCyclesDeps {
   continuity?: {
     inactivityThresholdDays: number;
   };
+  /** Re-queries a broadcast transaction's receipt without re-sending —
+   *  reconcilePendingCycles.ts's one building block. Required alongside
+   *  `executor`/`getAvailableBalanceAusd`: there's no sensible
+   *  configuration that executes live but never checks back on a cycle
+   *  stuck without a receipt (see scheduler/reconcilePendingCycles.ts). */
+  checkReceipt: (hash: Hex) => Promise<ReceiptCheckResult>;
+  /** Defaults to 30s — see reconcilePendingCycles.ts's ReconcileDeps for why
+   *  this is spacing between attempts, not a long initial wait. */
+  reconciliationGraceMs?: number;
 }
 
 export interface DueCycleResult {
@@ -104,6 +123,22 @@ export interface DueCycleResult {
 
 export async function runDueCycles(deps: RunDueCyclesDeps): Promise<DueCycleResult[]> {
   const now = deps.now();
+
+  // Re-check any cycle still sitting in EXECUTING without a resolved
+  // receipt before looking for new work — see reconcilePendingCycles.ts.
+  // Not surfaced in this function's own return value (which is about newly
+  // -run cycles specifically); a resolved cycle's SETTLED/FAILED state is
+  // what the app's screens read next, same as any other cycle.
+  const reconciled: ReconcileOutcome[] = await reconcilePendingCycles({
+    db: deps.db,
+    now: deps.now,
+    checkReceipt: deps.checkReceipt,
+    graceMs: deps.reconciliationGraceMs ?? 30_000,
+  });
+  if (reconciled.length > 0) {
+    console.log(`Reconciled ${reconciled.length} stuck cycle(s): ${reconciled.map((r) => `${r.cycleId}=${r.outcome}`).join(", ")}`);
+  }
+
   generateDueCycles(deps.db, now);
   const due = listDueCycles(deps.db, now.toISOString());
 

@@ -64,7 +64,8 @@ export function QuoteView() {
   }
 
   const isRequiresApproval = cycle.state === "REQUIRES_APPROVAL";
-  const heading = isRequiresApproval ? "Requires approval" : cycle.state === "SETTLED" ? "Settled" : "Payment quote";
+  const isExecuting = cycle.state === "EXECUTING";
+  const heading = isRequiresApproval ? "Requires approval" : cycle.state === "SETTLED" ? "Settled" : isExecuting ? "Confirming" : "Payment quote";
 
   return (
     <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 480 }}>
@@ -87,19 +88,58 @@ export function QuoteView() {
               <Row theme={theme} label="You send" value={formatUsd(quote.ausdAmount)} mono color={isRequiresApproval ? theme.warn : undefined} />
               <Row theme={theme} label="Rate locked" value={`1 AUSD = ${quote.fxRate.toLocaleString()} ${quote.localCurrency}`} mono />
               <Row theme={theme} label="Fee" value={formatUsd(feeTotal)} mono />
-              {!["SETTLED", "FAILED", "SKIPPED", "EXPIRED"].includes(cycle.state) && (
+              {/* Once execution has actually started, the quote's own
+                  expiry window is no longer the relevant clock — it
+                  already got used (or the cycle wouldn't be EXECUTING).
+                  Showing a countdown here read as confusing/stale. */}
+              {!["SETTLED", "FAILED", "SKIPPED", "EXPIRED", "EXECUTING"].includes(cycle.state) && (
                 <Row theme={theme} label="Expires in" value={expiryLabel} mono color={theme.warn} />
               )}
             </div>
 
             {!isRequiresApproval ? (
-              <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${theme.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", background: theme.success, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>
-                  ✓
+              <div style={{ marginTop: 20, paddingTop: 18, borderTop: `1px solid ${theme.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: isExecuting ? theme.bgAlt : theme.success,
+                      color: isExecuting ? theme.inkMuted : "#fff",
+                      border: isExecuting ? `1px solid ${theme.border}` : "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {isExecuting ? "…" : "✓"}
+                  </div>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                    {cycle.state === "SETTLED"
+                      ? "Settled in AUSD (Agora) on Monad"
+                      : isExecuting
+                        ? "Broadcast — confirming on-chain now"
+                        : "Signed and ready — Chainlink CRE executes automatically at expiry"}
+                  </span>
                 </div>
-                <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                  {cycle.state === "SETTLED" ? "Settled in AUSD (Agora) on Monad" : "Signed and ready — Chainlink CRE executes automatically at expiry"}
-                </span>
+                {/* A cycle that's broadcast but not yet confirmed is NOT
+                    "signed and ready" (that copy is only true before
+                    execution starts) — a stuck-in-EXECUTING cycle used to
+                    fall through to that exact wrong claim, the one UI gap
+                    flagged as worth a cheap fix before anything automated
+                    (reconcilePendingCycles.ts) even existed. */}
+                {isExecuting && cycle.txHash && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: theme.inkMuted }}>
+                    Transaction{" "}
+                    <span style={{ fontFamily: "'JetBrains Mono',monospace" }}>
+                      {cycle.txHash.slice(0, 10)}…{cycle.txHash.slice(-8)}
+                    </span>{" "}
+                    submitted — this updates automatically once it's mined.
+                  </div>
+                )}
               </div>
             ) : (
               <>

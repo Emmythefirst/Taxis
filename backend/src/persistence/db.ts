@@ -48,4 +48,9 @@ function migrate(db: Database.Database): void {
   if (!userColumns.some((c) => c.name === "continuity_inactivity_days")) {
     db.exec(`ALTER TABLE users ADD COLUMN continuity_inactivity_days INTEGER`);
   }
+
+  const cycleColumns = db.prepare(`PRAGMA table_info(cycles)`).all() as Array<{ name: string }>;
+  if (!cycleColumns.some((c) => c.name === "tx_hash")) {
+    db.exec(`ALTER TABLE cycles ADD COLUMN tx_hash TEXT`);
+  }
 }

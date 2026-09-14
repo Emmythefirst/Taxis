@@ -109,6 +109,10 @@ export interface Cycle {
   quote?: Quote;
   reservationId?: string;
   reason?: string;
+  /** Set once a transfer is broadcast (EXECUTING onward) — lets the UI link
+   *  to a block explorer instead of just claiming "signed and ready" for a
+   *  cycle that's actually already in flight or awaiting confirmation. */
+  txHash?: string;
   history: CycleHistoryEntry[];
 }
 

@@ -102,25 +102,31 @@ async function executeApprovedCycle(
       recipientAddress: quote.recipientAddress,
       amountBaseUnits,
     });
+    // Recorded the moment a transfer is actually broadcast — before we even
+    // know its outcome — so a cycle that ends up stuck in EXECUTING still
+    // has something for reconcilePendingCycles.ts to re-query later.
+    // transitionCycle() spreads its input cycle first, so this carries
+    // through into whichever terminal state follows.
+    const executingWithHash: Cycle = { ...executing, txHash: result.hash };
 
     if (!result.confirmed) {
       // See RunCycleOutcome's PENDING_CONFIRMATION doc — deliberately no
       // state transition and no reservation release here.
-      return { outcome: "PENDING_CONFIRMATION", cycle: executing, quote, txHash: result.hash };
+      return { outcome: "PENDING_CONFIRMATION", cycle: executingWithHash, quote, txHash: result.hash };
     }
 
     if (result.reverted) {
       // Confirmed on-chain revert — an ERC-20 revert rolls back the
       // transfer entirely, so funds definitely did not move. Safe to
       // release and let this cycle be retried.
-      deps.capStore.release(executing.reservationId!);
+      deps.capStore.release(executingWithHash.reservationId!);
       const reason = `Transaction ${result.hash} was mined but reverted on-chain`;
-      const failed = transitionCycle(executing, "FAILED", { reason, at: deps.now().toISOString() });
+      const failed = transitionCycle(executingWithHash, "FAILED", { reason, at: deps.now().toISOString() });
       return { outcome: "FAILED", cycle: failed, reason };
     }
 
-    deps.capStore.settle(executing.reservationId!);
-    const settled = transitionCycle(executing, "SETTLED", { at: deps.now().toISOString() });
+    deps.capStore.settle(executingWithHash.reservationId!);
+    const settled = transitionCycle(executingWithHash, "SETTLED", { at: deps.now().toISOString() });
     return { outcome: "SETTLED", cycle: settled, quote, txHash: result.hash };
   } catch (err) {
     // A rejected send (policy_violation, expired grant, etc.) — nothing was

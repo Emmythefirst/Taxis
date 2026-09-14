@@ -17,6 +17,11 @@
  *      must NOT release the reservation or retry automatically here: doing
  *      so risks a double payment if the original transaction eventually
  *      confirms. This needs manual reconciliation, not a guess.
+ *
+ * checkTransactionReceipt() below is that reconciliation's one building
+ * block — re-asking the same "confirmed? reverted?" question later for a
+ * hash that's already broadcast, without re-sending anything. See
+ * scheduler/reconcilePendingCycles.ts for the caller.
  */
 
 import type { PrivyClient } from "@privy-io/node";
@@ -78,6 +83,32 @@ export async function executeAusdTransfer(
     // from a thrown send above: here, something WAS broadcast, so its
     // eventual fate is unknown, not negative — see file header.
     return { hash, confirmed: false, reverted: false };
+  }
+}
+
+export interface ReceiptCheckResult {
+  /** True once a transaction receipt was actually observed on-chain. */
+  confirmed: boolean;
+  /** Only meaningful when `confirmed` is true. */
+  reverted: boolean;
+}
+
+/**
+ * A single, non-blocking look — not another `waitForTransactionReceipt`
+ * poll-with-timeout, since the caller (reconcilePendingCycles.ts) is itself
+ * called repeatedly on a schedule and will simply look again next time if
+ * this comes back unconfirmed. Any error (not found yet, or a transient RPC
+ * hiccup) is treated as "still pending, not negative" — the same
+ * conservative interpretation executeAusdTransfer()'s own catch block
+ * already uses above, for the same reason: never misclassify a transient
+ * failure as a real outcome.
+ */
+export async function checkTransactionReceipt(publicClient: PublicClient, hash: Hex): Promise<ReceiptCheckResult> {
+  try {
+    const receipt = await publicClient.getTransactionReceipt({ hash });
+    return { confirmed: true, reverted: receipt.status === "reverted" };
+  } catch {
+    return { confirmed: false, reverted: false };
   }
 }
 

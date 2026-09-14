@@ -63,7 +63,7 @@ function parseAmount(raw: string): number {
 
 export function NewPayment() {
   const { theme } = useAppTheme();
-  const { userId, walletAddress, setAgentQuorumId, refresh } = useAppData();
+  const { userId, walletAddress, continuity, setAgentQuorumId, refresh } = useAppData();
   const { addSigners } = useSigners();
   const navigate = useNavigate();
 
@@ -153,6 +153,26 @@ export function NewPayment() {
         </div>
         <h1 style={{ marginTop: 20, fontFamily: "'Unbounded',sans-serif", fontWeight: 700, fontSize: 22 }}>Payment set up</h1>
         <p style={{ marginTop: 8, fontSize: 14.5, color: theme.inkMuted }}>Taxis will generate a fresh quote every cycle and check it against your limits.</p>
+        {continuity?.configured && (
+          // A gap created at the exact moment it happens, not discovered
+          // later in Settings (progress.md: grant-expiry got a Dashboard
+          // banner for the same reason — "not every user visits Settings
+          // proactively," and an uncovered payment is more consequential
+          // to miss than a missed renewal). Actionable here specifically:
+          // refresh() has already run, so this new obligation is in
+          // AppDataContext by now and re-running continuity setup will
+          // pick it up along with everything else currently active.
+          <p style={{ marginTop: 14, fontSize: 13, color: theme.warn, lineHeight: 1.5 }}>
+            Your backup recipient won't cover this payment yet —{" "}
+            <button
+              onClick={() => navigate("/app/settings/continuity")}
+              style={{ background: "none", border: "none", color: theme.warn, fontWeight: 600, fontSize: 13, textDecoration: "underline", cursor: "pointer", padding: 0 }}
+            >
+              update continuity
+            </button>{" "}
+            to include it.
+          </p>
+        )}
         <button
           onClick={() => navigate("/app/payments")}
           style={{ marginTop: 24, padding: "13px 22px", background: theme.ink, color: theme.bg, border: "none", borderRadius: 4, fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
@@ -234,6 +254,11 @@ export function NewPayment() {
             <Row theme={theme} label="Your ceiling" value={`$${ceiling}`} mono />
             <Row theme={theme} label="Rate tolerance" value={tolerance} />
           </div>
+          {continuity?.configured && (
+            <p style={{ marginTop: 14, fontSize: 12.5, color: theme.inkMuted, lineHeight: 1.5 }}>
+              This payment won't be covered by your backup recipient until you update continuity setup after creating it.
+            </p>
+          )}
           {error && <p style={{ marginTop: 14, fontSize: 13, color: theme.warn }}>{error}</p>}
           <button
             onClick={handleSubmit}

@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS cycles (
   quote_json TEXT,
   reservation_id TEXT,
   reason TEXT,
+  -- Set once a transfer is broadcast (EXECUTING onward), never cleared —
+  -- what scheduler/reconcilePendingCycles.ts re-queries for a cycle stuck
+  -- in EXECUTING with no receipt yet observed.
+  tx_hash TEXT,
   history_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

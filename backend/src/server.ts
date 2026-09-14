@@ -33,7 +33,7 @@ import { registerContinuityRoutes, type ContinuityRouteDeps } from "./http/route
 import { registerCreRoutes } from "./http/routes/cre.js";
 import { staticMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
 import { ERC20_ABI } from "./privy/erc20.js";
-import { createPrivyTransferExecutor } from "./privy/execute.js";
+import { createPrivyTransferExecutor, checkTransactionReceipt } from "./privy/execute.js";
 import { formatBaseUnitsToDecimal } from "./domain/units.js";
 import type { Hex } from "./domain/types.js";
 
@@ -217,6 +217,7 @@ async function tryBuildLiveExecutionDeps(): Promise<{
         ausdDecimals,
         executorFor,
         getAvailableBalanceAusd,
+        checkReceipt: (hash) => checkTransactionReceipt(publicClient, hash),
       },
       checkout: {
         privy,

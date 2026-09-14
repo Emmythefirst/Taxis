@@ -9,6 +9,7 @@ interface CycleRow {
   quote_json: string | null;
   reservation_id: string | null;
   reason: string | null;
+  tx_hash: string | null;
   history_json: string;
   created_at: string;
   updated_at: string;
@@ -23,6 +24,7 @@ function rowToCycle(row: CycleRow): Cycle {
     quote: row.quote_json ? JSON.parse(row.quote_json) : undefined,
     reservationId: row.reservation_id ?? undefined,
     reason: row.reason ?? undefined,
+    txHash: row.tx_hash ?? undefined,
     history: JSON.parse(row.history_json),
   };
 }
@@ -31,9 +33,9 @@ export function insertCycle(db: Database.Database, cycle: Cycle): void {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO cycles
-       (id, obligation_id, due_at, state, quote_json, reservation_id, reason, history_json, created_at, updated_at)
+       (id, obligation_id, due_at, state, quote_json, reservation_id, reason, tx_hash, history_json, created_at, updated_at)
      VALUES
-       (@id, @obligationId, @dueAt, @state, @quoteJson, @reservationId, @reason, @historyJson, @createdAt, @updatedAt)`,
+       (@id, @obligationId, @dueAt, @state, @quoteJson, @reservationId, @reason, @txHash, @historyJson, @createdAt, @updatedAt)`,
   ).run({
     id: cycle.id,
     obligationId: cycle.obligationId,
@@ -42,6 +44,7 @@ export function insertCycle(db: Database.Database, cycle: Cycle): void {
     quoteJson: cycle.quote ? JSON.stringify(cycle.quote) : null,
     reservationId: cycle.reservationId ?? null,
     reason: cycle.reason ?? null,
+    txHash: cycle.txHash ?? null,
     historyJson: JSON.stringify(cycle.history),
     createdAt: now,
     updatedAt: now,
@@ -53,7 +56,7 @@ export function saveCycle(db: Database.Database, cycle: Cycle): void {
   db.prepare(
     `UPDATE cycles
      SET due_at = @dueAt, state = @state, quote_json = @quoteJson, reservation_id = @reservationId,
-         reason = @reason, history_json = @historyJson, updated_at = @updatedAt
+         reason = @reason, tx_hash = @txHash, history_json = @historyJson, updated_at = @updatedAt
      WHERE id = @id`,
   ).run({
     id: cycle.id,
@@ -62,6 +65,7 @@ export function saveCycle(db: Database.Database, cycle: Cycle): void {
     quoteJson: cycle.quote ? JSON.stringify(cycle.quote) : null,
     reservationId: cycle.reservationId ?? null,
     reason: cycle.reason ?? null,
+    txHash: cycle.txHash ?? null,
     historyJson: JSON.stringify(cycle.history),
     updatedAt: new Date().toISOString(),
   });
@@ -94,5 +98,20 @@ export function listDueCycles(db: Database.Database, asOf: string): Cycle[] {
        ORDER BY c.due_at`,
     )
     .all(asOf) as CycleRow[];
+  return rows.map(rowToCycle);
+}
+
+/**
+ * Cycles reconcilePendingCycles.ts should re-check: still EXECUTING (the
+ * original send's own wait-for-receipt already timed out once — that's how
+ * a cycle got here), broadcast (a tx_hash exists), and not touched again too
+ * soon (last updated at or before `updatedBefore` — the grace window; see
+ * reconcilePendingCycles.ts for why that's a small spacing constant, not a
+ * long wait, given the original send already waited its own timeout).
+ */
+export function listStuckExecutingCycles(db: Database.Database, updatedBefore: string): Cycle[] {
+  const rows = db
+    .prepare(`SELECT * FROM cycles WHERE state = 'EXECUTING' AND tx_hash IS NOT NULL AND updated_at <= ? ORDER BY updated_at`)
+    .all(updatedBefore) as CycleRow[];
   return rows.map(rowToCycle);
 }

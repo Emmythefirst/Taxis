@@ -172,5 +172,14 @@ export interface Cycle {
   reservationId?: string;
   /** Populated on SKIPPED/FAILED so the user is never left guessing. */
   reason?: string;
+  /**
+   * Set the moment a transfer is actually broadcast (EXECUTING onward) —
+   * never cleared once set, even after SETTLED/FAILED, so there's always
+   * an on-chain reference to point to. Also what
+   * scheduler/reconcilePendingCycles.ts re-queries for a cycle that's been
+   * sitting in EXECUTING without a receipt: without persisting this, a
+   * stuck cycle has nothing to check back on later.
+   */
+  txHash?: string;
   history: CycleHistoryEntry[];
 }

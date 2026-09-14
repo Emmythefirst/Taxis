@@ -24,7 +24,7 @@ import { createPublicClient, http } from "viem";
 import { rmSync } from "node:fs";
 import { ERC20_ABI } from "../src/privy/erc20.js";
 import { createGrantPolicy } from "../src/privy/policy.js";
-import { createPrivyTransferExecutor } from "../src/privy/execute.js";
+import { createPrivyTransferExecutor, checkTransactionReceipt } from "../src/privy/execute.js";
 import { openDb } from "../src/persistence/db.js";
 import { insertUser, setUserWallet, touchUserActivity } from "../src/persistence/users.js";
 import { insertRecipient } from "../src/persistence/recipients.js";
@@ -185,6 +185,7 @@ async function main() {
     ausdDecimals,
     executorFor,
     getAvailableBalanceAusd,
+    checkReceipt: (hash) => checkTransactionReceipt(publicClient, hash),
     continuity: { inactivityThresholdDays },
   });
 

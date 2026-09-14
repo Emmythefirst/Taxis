@@ -57,6 +57,7 @@ function makeDeps(executor: TransferExecutor, now: () => Date): RunDueCyclesDeps
     ausdDecimals: 6,
     executorFor: () => executor,
     getAvailableBalanceAusd: async () => 5000,
+    checkReceipt: async () => ({ confirmed: false, reverted: false }),
   };
 }
 
