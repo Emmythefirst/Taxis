@@ -120,7 +120,7 @@ export function Settings() {
       </div>
 
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 22, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Active permissions</h2>
+        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Payment permissions</h2>
         {activeObligations.length === 0 ? (
           <p style={{ fontSize: 13.5, color: theme.inkMuted }}>No active payments.</p>
         ) : (
@@ -189,6 +189,22 @@ export function Settings() {
         )}
       </div>
 
+      {walletAddress && (
+        <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 22, marginTop: 20 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Technical verification</h2>
+          <p style={{ fontSize: 12.5, color: theme.inkMuted, marginBottom: 16 }}>
+            What actually enforces the limits above — not marketing language, the real mechanism.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <VerificationRow theme={theme} label="Privy session authorization" detail="Agent key scoped to your wallet, revocable anytime" />
+            <VerificationRow theme={theme} label="Quote signing" detail="Every quote signed (secp256k1), independently verifiable" />
+            <VerificationRow theme={theme} label="Chainlink CRE automation" detail="Scheduled checks run via a real CRE workflow" />
+            <VerificationRow theme={theme} label="Monad settlement" detail="Transfers settle on Monad, not a simulated ledger" />
+            <VerificationRow theme={theme} label="Agora AUSD" detail="Funds held and moved as AUSD" />
+          </div>
+        </div>
+      )}
+
       <div style={{ marginTop: 20, textAlign: "center" }}>
         <button
           onClick={() => logout()}
@@ -196,6 +212,18 @@ export function Settings() {
         >
           Log out
         </button>
+      </div>
+    </div>
+  );
+}
+
+function VerificationRow({ theme, label, detail }: { theme: ReturnType<typeof useAppTheme>["theme"]; label: string; detail: string }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <span style={{ color: theme.success, fontWeight: 700, fontSize: 13, lineHeight: "20px" }}>✓</span>
+      <div>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 12.5, color: theme.inkMuted, marginTop: 2 }}>{detail}</div>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ import * as endpoints from "../../api/endpoints";
 export function QuoteView() {
   const { obligationId, cycleId } = useParams<{ obligationId: string; cycleId: string }>();
   const { theme } = useAppTheme();
-  const { obligations, recipients, cycles, refresh } = useAppData();
+  const { obligations, recipients, cycles, grants, refresh } = useAppData();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -19,6 +19,9 @@ export function QuoteView() {
   const cycle = cycles.find((c) => c.cycle.id === cycleId)?.cycle;
   const quote = cycle?.quote;
   const expiryLabel = useCountdown(quote?.expiresAt);
+  const activeGrant = grants
+    .filter((g) => g.obligationId === obligationId && g.grant.kind === "CYCLE" && g.grant.status === "ACTIVE")
+    .sort((a, b) => new Date(b.grant.expiresAt).getTime() - new Date(a.grant.expiresAt).getTime())[0]?.grant;
 
   const feeTotal = useMemo(() => (quote ? Number(quote.feeAgentAusd) + Number(quote.feeNetworkAusd) : 0), [quote]);
 
@@ -65,7 +68,9 @@ export function QuoteView() {
 
   const isRequiresApproval = cycle.state === "REQUIRES_APPROVAL";
   const isExecuting = cycle.state === "EXECUTING";
-  const heading = isRequiresApproval ? "Requires approval" : cycle.state === "SETTLED" ? "Settled" : isExecuting ? "Confirming" : "Payment quote";
+  const isSettled = cycle.state === "SETTLED";
+  const isPendingQuote = !isRequiresApproval && !isExecuting && !isSettled;
+  const heading = isRequiresApproval ? "Requires approval" : isSettled ? "Settled" : isExecuting ? "Confirming" : "Payment quote";
 
   return (
     <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 480 }}>
@@ -140,12 +145,42 @@ export function QuoteView() {
                     submitted — this updates automatically once it's mined.
                   </div>
                 )}
+
+                {/* The trust thesis made visible BEFORE the fact, not just
+                    after — Explain.tsx already shows "why Taxis paid" for a
+                    settled cycle, but until now a quote still waiting on
+                    its scheduled execution showed raw numbers with no
+                    framing of what's actually being checked. Real
+                    obligation/grant values, not generic copy — same rule
+                    Explain.tsx already follows. */}
+                {isPendingQuote && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+                      Taxis will pay automatically if
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <CheckRow theme={theme} text={`${recipient?.label ?? "Recipient"} stays an authorized recipient`} />
+                      <CheckRow theme={theme} text={`Cost (${formatUsd(quote.ausdAmount)}) stays below your ${formatUsd(obligation.maxAusdCost)} limit`} />
+                      <CheckRow theme={theme} text={`Fee (${formatUsd(feeTotal)}) stays below your ${formatUsd(obligation.maxFeeAusd)} limit`} />
+                      <CheckRow theme={theme} text={`Stays within your ${formatUsd(obligation.cumulativeCapAusd)} monthly cap`} />
+                      {activeGrant && (
+                        <CheckRow theme={theme} text={`Your payment permission stays active (until ${new Date(activeGrant.expiresAt).toLocaleDateString()})`} />
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>
-                <div style={{ marginTop: 20, padding: 14, background: theme.bgAlt, borderRadius: 4 }}>
+                <div style={{ marginTop: 20, padding: 14, background: theme.bgAlt, borderRadius: 4, borderLeft: `3px solid ${theme.warn}` }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: theme.warn }}>⚠ Outside your tolerance — needs your approval</div>
                   <p style={{ marginTop: 6, fontSize: 13, color: theme.inkMuted, lineHeight: 1.5 }}>{cycle.reason}</p>
+                  {/* The single most trust-building line on this whole
+                      screen, per both UI reviews — the agent stopped
+                      itself before spending outside the envelope, and
+                      nothing happened as a result. Said plainly, not
+                      buried in the reason text above. */}
+                  <p style={{ marginTop: 10, fontSize: 13, fontWeight: 700, color: theme.ink }}>Nothing has been charged.</p>
                 </div>
                 {error && <p style={{ marginTop: 12, fontSize: 13, color: theme.warn }}>{error}</p>}
                 <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
@@ -178,6 +213,15 @@ function Row({ theme, label, value, mono, color }: { theme: ReturnType<typeof us
     <div style={{ display: "flex", justifyContent: "space-between" }}>
       <span style={{ fontSize: 14, color: theme.inkMuted }}>{label}</span>
       <span style={{ fontSize: 14, fontWeight: 600, fontFamily: mono ? "'JetBrains Mono',monospace" : undefined, color }}>{value}</span>
+    </div>
+  );
+}
+
+function CheckRow({ theme, text }: { theme: ReturnType<typeof useAppTheme>["theme"]; text: string }) {
+  return (
+    <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+      <span style={{ color: theme.success, fontWeight: 700, fontSize: 13, lineHeight: "18px" }}>✓</span>
+      <span style={{ fontSize: 13, lineHeight: 1.5 }}>{text}</span>
     </div>
   );
 }

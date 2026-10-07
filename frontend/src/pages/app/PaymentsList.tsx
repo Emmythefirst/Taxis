@@ -5,6 +5,8 @@ import { useAppData } from "../../app/AppDataContext";
 import { formatCadence, formatLocalAmount } from "../../app/format";
 import { pillColors } from "../../theme/theme";
 
+const NON_TERMINAL = new Set(["PENDING_QUOTE", "QUOTED", "FUNDS_RESERVED", "AUTO_APPROVED", "REQUIRES_APPROVAL", "EXECUTING"]);
+
 export function PaymentsList() {
   const { theme, dark } = useAppTheme();
   const { recipients, obligations, cycles } = useAppData();
@@ -16,17 +18,17 @@ export function PaymentsList() {
     () =>
       obligations.map((o) => {
         const recipient = recipientById.get(o.recipientId);
-        const hasPendingReview = cycles.some(({ obligationId, cycle }) => obligationId === o.id && cycle.state === "REQUIRES_APPROVAL");
-        const status = o.status !== "ACTIVE" ? "Paused" : hasPendingReview ? "Needs review" : "Active";
-        const kind: "success" | "warn" | "neutral" = status === "Active" ? "success" : status === "Needs review" ? "warn" : "neutral";
 
         // Most relevant cycle to jump to: the latest non-settled one if any, else the most recent overall.
         const obligationCycles = cycles.filter((c) => c.obligationId === o.id).map((c) => c.cycle);
-        const relevant =
-          obligationCycles.find((c) => c.state === "REQUIRES_APPROVAL") ??
-          [...obligationCycles].sort((a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime())[0];
+        const pendingReview = obligationCycles.find((c) => c.state === "REQUIRES_APPROVAL");
+        const relevant = pendingReview ?? [...obligationCycles].sort((a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime())[0];
 
-        return { obligation: o, recipient, status, kind, relevantCycleId: relevant?.id };
+        const status = o.status !== "ACTIVE" ? "Paused" : pendingReview ? "Needs review" : "Active";
+        const kind: "success" | "warn" | "neutral" = status === "Active" ? "success" : status === "Needs review" ? "warn" : "neutral";
+        const nextDueAt = status === "Active" && relevant && NON_TERMINAL.has(relevant.state) ? relevant.dueAt : undefined;
+
+        return { obligation: o, recipient, status, kind, relevantCycleId: relevant?.id, reviewReason: pendingReview?.reason, nextDueAt };
       }),
     [obligations, recipientById, cycles],
   );
@@ -47,18 +49,41 @@ export function PaymentsList() {
         <div style={{ color: theme.inkMuted, fontSize: 14 }}>No payments set up yet.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
-          {rows.map(({ obligation: o, recipient, status, kind, relevantCycleId }) => {
+          {rows.map(({ obligation: o, recipient, status, kind, relevantCycleId, reviewReason, nextDueAt }) => {
             const colors = pillColors(theme, dark, kind);
+            const needsReview = status === "Needs review";
             return (
               <div
                 key={o.id}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 22px", borderBottom: `1px solid ${theme.border}`, background: theme.surface }}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "20px 22px",
+                  borderBottom: `1px solid ${theme.border}`,
+                  // A same-weight pill undersold this — REQUIRES_APPROVAL
+                  // is arguably the single most important state in the
+                  // whole app (the agent stopped itself, on purpose,
+                  // because a real number crossed a real limit). A left
+                  // accent + tinted background gives it the visual weight
+                  // that actually matches what it means.
+                  borderLeft: `3px solid ${needsReview ? theme.warn : "transparent"}`,
+                  background: needsReview ? colors.bg : theme.surface,
+                }}
               >
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{recipient?.label ?? "Recipient"}</div>
                   <div style={{ fontSize: 13, color: theme.inkMuted, marginTop: 4 }}>
                     {formatCadence(o.cadence)} · {formatLocalAmount(o.targetLocalAmount, o.localCurrency)} · up to ${o.maxAusdCost}
                   </div>
+                  {nextDueAt && (
+                    <div style={{ fontSize: 12.5, color: theme.inkMuted, marginTop: 4 }}>
+                      Next payment {new Date(nextDueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </div>
+                  )}
+                  {needsReview && reviewReason && (
+                    <div style={{ fontSize: 12.5, color: theme.warn, marginTop: 6, maxWidth: 360, lineHeight: 1.4 }}>{reviewReason}</div>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 12, background: colors.bg, color: colors.color }}>{status}</span>
@@ -67,16 +92,16 @@ export function PaymentsList() {
                     onClick={() => relevantCycleId && navigate(`/app/obligations/${o.id}/quotes/${relevantCycleId}`)}
                     style={{
                       padding: "9px 14px",
-                      background: "none",
-                      border: `1px solid ${theme.border}`,
+                      background: needsReview ? theme.warn : "none",
+                      border: needsReview ? "none" : `1px solid ${theme.border}`,
                       borderRadius: 4,
                       fontWeight: 600,
                       fontSize: 13,
                       cursor: relevantCycleId ? "pointer" : "default",
-                      color: relevantCycleId ? theme.ink : theme.inkMuted,
+                      color: needsReview ? "#fff" : relevantCycleId ? theme.ink : theme.inkMuted,
                     }}
                   >
-                    View quote
+                    {needsReview ? "Review payment" : "View payment"}
                   </button>
                 </div>
               </div>

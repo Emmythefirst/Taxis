@@ -6,7 +6,7 @@ export type ActivityKind = "cycle" | "checkout";
 
 export interface ActivityStatus {
   label: string;
-  kind: "success" | "warn" | "neutral";
+  kind: "success" | "warn" | "danger" | "neutral";
 }
 
 export interface ActivityItem {
@@ -28,7 +28,11 @@ export function cycleStatusPresentation(state: CycleState): ActivityStatus {
     case "SKIPPED":
       return { label: "Skipped", kind: "neutral" };
     case "FAILED":
-      return { label: "Failed", kind: "warn" };
+      // Deliberately NOT "warn" — that's "needs your decision" (amber,
+      // actionable, not bad news); FAILED is a concluded, adverse outcome
+      // (the agent tried and was rejected), a meaningfully different
+      // severity (see Theme.danger's own comment in theme.ts).
+      return { label: "Failed", kind: "danger" };
     case "EXPIRED":
       return { label: "Expired", kind: "neutral" };
     case "EXECUTING":
@@ -43,7 +47,7 @@ export function checkoutStatusPresentation(status: CheckoutStatus): ActivityStat
     case "SETTLED":
       return { label: "Settled", kind: "success" };
     case "FAILED":
-      return { label: "Failed", kind: "warn" };
+      return { label: "Failed", kind: "danger" };
     case "EXPIRED":
       return { label: "Expired", kind: "neutral" };
     default:

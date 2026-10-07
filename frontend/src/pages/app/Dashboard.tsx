@@ -51,6 +51,21 @@ export function Dashboard() {
     [cycles, checkouts, recipientById, obligationById],
   );
 
+  // Home used to show only the single most-imminent cycle ("Coming up") —
+  // a user with three active payments had no way to see that from this
+  // screen at all without clicking into Payments. A compact strip (not a
+  // full duplicate of PaymentsList's detailed rows — that's one click
+  // away) makes Home feel like an actual overview rather than a single
+  // card plus empty space.
+  const paymentsOverview = useMemo(() => {
+    return obligations
+      .filter((o) => o.status === "ACTIVE")
+      .map((o) => {
+        const needsReview = cycles.some(({ obligationId, cycle }) => obligationId === o.id && cycle.state === "REQUIRES_APPROVAL");
+        return { obligation: o, recipient: recipientById.get(o.recipientId), needsReview };
+      });
+  }, [obligations, recipientById, cycles]);
+
   const renewalNeeded = useMemo(() => {
     return obligations
       .filter((o) => o.status === "ACTIVE")
@@ -104,7 +119,19 @@ export function Dashboard() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
+      {/* The relationship between these two numbers used to be implicit —
+          two cards, no sum, no stated connection. Stating the total
+          explicitly ("$618, $203.84 of it already committed") is cheap and
+          directly reinforces the bounded-authority thesis: Taxis only ever
+          touches the reserved slice, never the available one, without a
+          fresh quote. */}
+      {balance !== undefined && (
+        <div style={{ marginTop: 24, fontSize: 13, color: theme.inkMuted }}>
+          Total balance{" "}
+          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 600, color: theme.ink }}>{formatUsd(Number(balance) + earmarked)}</span>
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 10 }}>
         <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 24 }}>
           <div style={{ fontSize: 12.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>Available to spend</div>
           <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 600, fontSize: 32, marginTop: 8 }}>
@@ -112,7 +139,7 @@ export function Dashboard() {
           </div>
         </div>
         <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 24 }}>
-          <div style={{ fontSize: 12.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>Earmarked for upcoming</div>
+          <div style={{ fontSize: 12.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>Reserved for upcoming</div>
           <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 600, fontSize: 32, marginTop: 8, color: theme.inkMuted }}>
             {formatUsd(earmarked)}
           </div>
@@ -146,12 +173,48 @@ export function Dashboard() {
             onClick={() => navigate(`/app/obligations/${comingUp.obligationId}/quotes/${comingUp.cycle.id}`)}
             style={{ padding: "11px 18px", background: theme.ink, color: theme.bg, border: "none", borderRadius: 4, fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}
           >
-            View quote
+            View payment
           </button>
         </div>
       ) : (
         <div style={{ marginTop: 32, padding: "22px 24px", border: `1px solid ${theme.border}`, borderRadius: 6, color: theme.inkMuted, fontSize: 14 }}>
           Nothing scheduled right now.
+        </div>
+      )}
+
+      {paymentsOverview.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 700, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              Your payments ({paymentsOverview.length})
+            </h2>
+            <button onClick={() => navigate("/app/payments")} style={{ background: "none", border: "none", color: theme.accent, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              View all
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
+            {paymentsOverview.map(({ obligation: o, recipient, needsReview }) => (
+              <div
+                key={o.id}
+                onClick={() => navigate("/app/payments")}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "13px 16px",
+                  borderBottom: `1px solid ${theme.border}`,
+                  borderLeft: `3px solid ${needsReview ? theme.warn : "transparent"}`,
+                  background: needsReview ? pillColors(theme, dark, "warn").bg : theme.surface,
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>{recipient?.label ?? "Recipient"}</span>
+                <span style={{ fontSize: 12.5, color: needsReview ? theme.warn : theme.inkMuted, fontWeight: needsReview ? 600 : 400 }}>
+                  {needsReview ? "Needs review" : `up to $${o.maxAusdCost}`}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -31,7 +31,7 @@ import { registerObligationsRoutes, type ObligationsRouteDeps } from "./http/rou
 import { registerCheckoutRoutes, type CheckoutRouteDeps } from "./http/routes/checkout.js";
 import { registerContinuityRoutes, type ContinuityRouteDeps } from "./http/routes/continuity.js";
 import { registerCreRoutes } from "./http/routes/cre.js";
-import { staticMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
+import { staticMarketDataProvider, liveMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
 import { ERC20_ABI } from "./privy/erc20.js";
 import { createPrivyTransferExecutor, checkTransactionReceipt } from "./privy/execute.js";
 import { formatBaseUnitsToDecimal } from "./domain/units.js";
@@ -134,9 +134,25 @@ export function createTaxisServer(options: CreateServerOptions = {}) {
       res.end();
       return;
     }
-    const handled = await router.handle(req, res);
-    if (!handled) {
-      sendJson(res, 404, { error: "not found" });
+    try {
+      const handled = await router.handle(req, res);
+      if (!handled) {
+        sendJson(res, 404, { error: "not found" });
+      }
+    } catch (err) {
+      // Without this, any route handler that throws (a transient network
+      // failure reaching Privy, an unexpected DB error, anything) becomes
+      // an unhandled promise rejection here — Node's http module doesn't
+      // await/catch an async request listener's own promise, and Node 20
+      // crashes the whole process on an unhandled rejection by default.
+      // Confirmed live: a single Privy API timeout during /users/sync took
+      // the entire backend down mid-session, not just that one request —
+      // exactly the failure mode a live demo can least afford. One failed
+      // request should fail, not the process.
+      console.error("Unhandled error in request handler:", err);
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: "internal error", detail: err instanceof Error ? err.message : String(err) });
+      }
     }
   });
 }
@@ -199,7 +215,13 @@ async function tryBuildLiveExecutionDeps(): Promise<{
       return Number(formatBaseUnitsToDecimal(balance, ausdDecimals));
     };
 
-    const market = staticMarketDataProvider();
+    // Live by default — real per-currency FX, refreshed in the background
+    // (pricing/marketData.ts). MARKET_DATA_SOURCE=static is the explicit
+    // escape hatch: a demo venue's wifi dropping shouldn't be a reason to
+    // debug code live, just flip an env var and restart.
+    const marketDataSource = process.env.MARKET_DATA_SOURCE ?? "live";
+    const market = marketDataSource === "static" ? staticMarketDataProvider() : liveMarketDataProvider();
+    console.log(`Market data source: ${marketDataSource}`);
 
     return {
       privy,

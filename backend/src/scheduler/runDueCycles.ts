@@ -19,15 +19,20 @@
  * the one failure mode that directly contradicted that promise. See
  * scheduler/reconcilePendingCycles.ts.
  *
- * Two honest scope limitations, not silently glossed over:
+ * Two honest notes on scope, not silently glossed over (the first used to
+ * describe a real limitation; now it describes what replaced it):
  *
- * 1. **No real FX/fee source is integrated.** `MarketDataProvider` is a
- *    clearly-flagged placeholder (`staticMarketDataProvider`, env-var
- *    driven) standing in for a real FX API. The quote it produces is still
- *    fully real and signed, and the executed transfer is still a genuine
- *    on-chain transaction — only the market data feeding the decision is
- *    fake. Do not ship a real remittance product on this; do use it to
- *    prove the scheduling/execution wiring works.
+ * 1. **FX is real (closed 2026-10-07), fees are not.** `MarketDataProvider`
+ *    now has two implementations — `liveMarketDataProvider` (real
+ *    per-currency rates from a free FX API, server.ts's default) and the
+ *    original `staticMarketDataProvider` placeholder (an explicit env-var
+ *    fallback — see server.ts's `MARKET_DATA_SOURCE`). There is no
+ *    equivalent "real" source for Taxis's own agent/network fee — those
+ *    are a genuine product choice (what Taxis charges), not external
+ *    market data, so they stay operator-set env vars either way. The quote
+ *    produced is, and always was, fully real and signed; the executed
+ *    transfer is, and always was, a genuine on-chain transaction — this
+ *    only ever affected which INPUT numbers fed the decision.
  *
  * 2. **Resolved per real user wallet, not one global demo wallet.** Each
  *    obligation's owner has their own embedded wallet, linked via
@@ -80,9 +85,9 @@ import { generateDueCycles } from "./generateDueCycles.js";
 import { reconcilePendingCycles, type ReconcileOutcome } from "./reconcilePendingCycles.js";
 import type { Hex } from "../domain/types.js";
 import type { ReceiptCheckResult } from "../privy/execute.js";
-import { staticMarketDataProvider, type MarketDataProvider } from "../pricing/marketData.js";
+import { staticMarketDataProvider, liveMarketDataProvider, type MarketDataProvider } from "../pricing/marketData.js";
 
-export { staticMarketDataProvider, type MarketDataProvider };
+export { staticMarketDataProvider, liveMarketDataProvider, type MarketDataProvider };
 
 export type GrantKind = "CYCLE" | "CONTINUITY";
 

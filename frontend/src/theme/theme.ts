@@ -14,6 +14,17 @@ export interface Theme {
   accent: string;
   success: string;
   warn: string;
+  /**
+   * Distinct from `warn` — scoped specifically to the status-pill system
+   * (pillColors' "danger" kind), not a general app-wide error color.
+   * `warn` already means two different things throughout the app
+   * ("needs your decision," e.g. REQUIRES_APPROVAL — amber, actionable and
+   * not actually bad news; and generic form/network error text). This adds
+   * a third, specifically for a cycle/checkout that was actually attempted
+   * and rejected (FAILED) — a concluded, adverse outcome, not a pending
+   * one. See activityFeed.ts's cycleStatusPresentation().
+   */
+  danger: string;
 }
 
 export const lightTheme: Theme = {
@@ -26,6 +37,7 @@ export const lightTheme: Theme = {
   accent: "#3452E1",
   success: "#2F7A52",
   warn: "#B5451F",
+  danger: "#C23B3B",
 };
 
 export const darkTheme: Theme = {
@@ -38,6 +50,7 @@ export const darkTheme: Theme = {
   accent: "#5B75FF",
   success: "#4CAF7D",
   warn: "#E28A63",
+  danger: "#E6625A",
 };
 
 /** Landing-page-only tokens (marketing page's blobs/shadows/header blur — not needed by the app shell). */
@@ -71,12 +84,15 @@ export const darkLandingTheme: LandingTheme = {
   blob2: "radial-gradient(circle,#1F9E8A,transparent 70%)",
 };
 
-export function pillColors(theme: Theme, dark: boolean, kind: "success" | "warn" | "neutral") {
+export function pillColors(theme: Theme, dark: boolean, kind: "success" | "warn" | "danger" | "neutral") {
   if (kind === "success") {
     return { bg: dark ? "rgba(76,175,125,0.18)" : "rgba(47,122,82,0.12)", color: theme.success };
   }
   if (kind === "warn") {
     return { bg: dark ? "rgba(226,138,99,0.18)" : "rgba(181,69,31,0.10)", color: theme.warn };
+  }
+  if (kind === "danger") {
+    return { bg: dark ? "rgba(230,98,90,0.18)" : "rgba(194,59,59,0.10)", color: theme.danger };
   }
   return { bg: dark ? "rgba(154,155,166,0.18)" : "rgba(91,92,102,0.10)", color: theme.inkMuted };
 }

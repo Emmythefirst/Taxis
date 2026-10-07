@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
 import { formatUsd } from "../../app/format";
+import { explorerTxUrl } from "../../app/explorer";
 
 const SETTLED_CYCLE_CHECKS = [
   "Payment was due today",
@@ -45,6 +46,7 @@ export function Explain() {
         reason={checkout.reason}
         date={new Date(checkout.updatedAt).toLocaleString()}
         ref={checkout.quote.nonce}
+        txHash={checkout.txHash}
       />
     );
   }
@@ -56,7 +58,22 @@ export function Explain() {
   const recipient = recipients.find((r) => r.id === obligation?.recipientId);
   const settled = cycle.state === "SETTLED";
   const wasManuallyApproved = cycle.history.some((h) => h.to === "REQUIRES_APPROVAL");
-  const heading = settled ? "Payment executed because" : cycle.state === "SKIPPED" ? "Payment skipped — nothing was charged" : "Payment paused — nothing was charged";
+  // Explain is only ever reached for a TERMINAL cycle (activityFeed.ts only
+  // lists SETTLED/FAILED/SKIPPED/EXPIRED) — so this needs to distinguish
+  // all three non-SETTLED endings, the same way the checkout branch above
+  // already correctly does. It used to collapse FAILED and EXPIRED into
+  // "Payment paused," the exact phrase REQUIRES_APPROVAL uses elsewhere —
+  // wrong for a cycle that was actually attempted and rejected (e.g. a
+  // kill-switch revocation causing a real Privy policy rejection), which
+  // is a concluded, adverse outcome, not something still awaiting a
+  // decision.
+  const heading = settled
+    ? "Payment executed because"
+    : cycle.state === "SKIPPED"
+      ? "Payment skipped — nothing was charged"
+      : cycle.state === "EXPIRED"
+        ? "Payment expired — nothing was charged"
+        : "Payment failed — nothing was charged";
 
   return (
     <ExplainCard
@@ -70,6 +87,7 @@ export function Explain() {
       reason={cycle.reason}
       date={new Date(cycle.history[cycle.history.length - 1]?.at ?? cycle.dueAt).toLocaleString()}
       ref={cycle.quote?.nonce ?? cycle.id}
+      txHash={cycle.txHash}
     />
   );
 }
@@ -96,6 +114,7 @@ function ExplainCard(props: {
   reason?: string;
   date: string;
   ref: string;
+  txHash?: string;
 }) {
   const { theme } = props;
   return (
@@ -120,6 +139,25 @@ function ExplainCard(props: {
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <span style={{ color: theme.warn, fontWeight: 700 }}>⚠</span>
             <span style={{ fontSize: 14, lineHeight: 1.5 }}>{props.reason ?? "No further detail recorded."}</span>
+          </div>
+        )}
+
+        {props.settled && props.txHash && (
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 11.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>Settlement</div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, marginTop: 4 }}>
+                {props.txHash.slice(0, 10)}…{props.txHash.slice(-8)}
+              </div>
+            </div>
+            <a
+              href={explorerTxUrl(props.txHash)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 12.5, fontWeight: 600, color: theme.accent, textDecoration: "none" }}
+            >
+              View on explorer →
+            </a>
           </div>
         )}
 

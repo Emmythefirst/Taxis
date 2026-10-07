@@ -10,6 +10,14 @@ import type { TransferExecutor } from "../src/engine/quoteEngine.js";
 const QUOTE_SIGNING_PRIVATE_KEY = `0x${"ab".repeat(32)}` as const;
 const AUSD_ADDRESS = "0x000000000000000000000000000000000000ff" as const;
 const MERCHANT = "0x000000000000000000000000000000000000cc" as const;
+// Matches makeCreateDeps()'s `now` (quote created 2026-10-01T09:00:00Z,
+// expirySeconds: 600) — a few minutes later, inside that 10-minute window.
+// A real regression, not hypothetical: these executeCheckout() calls used
+// to omit `now` entirely, silently relying on real Date.now() staying
+// within the quote's window at whatever moment the suite happened to run —
+// which held for weeks, then broke the instant real wall-clock time
+// actually caught up to the hardcoded quote date.
+const EXECUTE_NOW = () => new Date("2026-10-01T09:05:00.000Z");
 
 let db: Database.Database;
 let policyIds: string[];
@@ -117,7 +125,7 @@ describe("executeCheckout", () => {
     const checkoutId = await seedPendingCheckout();
     const executor = new FakeExecutor("succeed");
 
-    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor }, checkoutId);
+    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor, now: EXECUTE_NOW }, checkoutId);
 
     expect(outcome).toEqual({ outcome: "SETTLED", txHash: "0xdeadbeef" });
     expect(executor.calls[0]?.amountBaseUnits).toBe(10_750_000n);
@@ -126,7 +134,7 @@ describe("executeCheckout", () => {
 
   it("fails and persists a reason when the send is rejected", async () => {
     const checkoutId = await seedPendingCheckout();
-    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("reject") }, checkoutId);
+    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("reject"), now: EXECUTE_NOW }, checkoutId);
 
     expect(outcome.outcome).toBe("FAILED");
     expect(getCheckout(db, checkoutId)?.status).toBe("FAILED");
@@ -134,7 +142,7 @@ describe("executeCheckout", () => {
 
   it("fails when the transaction confirms reverted on-chain", async () => {
     const checkoutId = await seedPendingCheckout();
-    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("revert") }, checkoutId);
+    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("revert"), now: EXECUTE_NOW }, checkoutId);
 
     expect(outcome.outcome).toBe("FAILED");
     if (outcome.outcome !== "FAILED") throw new Error("expected FAILED");
@@ -143,7 +151,7 @@ describe("executeCheckout", () => {
 
   it("returns PENDING_CONFIRMATION without marking the checkout FAILED when unconfirmed", async () => {
     const checkoutId = await seedPendingCheckout();
-    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("unconfirmed") }, checkoutId);
+    const outcome = await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("unconfirmed"), now: EXECUTE_NOW }, checkoutId);
 
     expect(outcome).toEqual({ outcome: "PENDING_CONFIRMATION", txHash: "0xdeadbeef" });
     // Deliberately left PENDING_APPROVAL, not FAILED — same reasoning as
@@ -157,9 +165,11 @@ describe("executeCheckout", () => {
 
   it("throws if executed twice (not PENDING_APPROVAL the second time)", async () => {
     const checkoutId = await seedPendingCheckout();
-    await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("succeed") }, checkoutId);
+    await executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("succeed"), now: EXECUTE_NOW }, checkoutId);
 
-    await expect(executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("succeed") }, checkoutId)).rejects.toThrow(/not PENDING_APPROVAL/);
+    await expect(
+      executeCheckout({ db, ausdDecimals: 6, executor: new FakeExecutor("succeed"), now: EXECUTE_NOW }, checkoutId),
+    ).rejects.toThrow(/not PENDING_APPROVAL/);
   });
 
   it("marks an expired checkout EXPIRED instead of attempting execution", async () => {

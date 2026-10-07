@@ -517,3 +517,64 @@ describe("grant confirmation retargets other active grants — never at creation
     expect(getActiveGrant(liveDb, "obl_b", "CYCLE")?.policyId).toBe(created.policyId);
   });
 });
+
+describe("a route handler throwing fails only that request, not the whole server", () => {
+  let crashProneServer: Server;
+  let crashProneBaseUrl: string;
+  let crashProneDb: Database.Database;
+
+  beforeAll(async () => {
+    crashProneDb = openDb(":memory:");
+
+    // Reproduces exactly what happened live: findWalletForPrivyUser()
+    // (called from /users/sync) threw because Privy's API was unreachable
+    // (a real network timeout, not a code bug) — and with no try/catch
+    // anywhere in the request-handling chain, that became an unhandled
+    // promise rejection that crashed the entire Node process, not just
+    // that one request. This fake reproduces the same throw without
+    // needing a real network failure.
+    const flakyPrivy = {
+      wallets: () => ({
+        list: async () => {
+          throw new Error("simulated network failure reaching Privy");
+        },
+      }),
+    } as any;
+
+    crashProneServer = createTaxisServer({
+      db: crashProneDb,
+      privy: flakyPrivy,
+      ausdAddress: "0x000000000000000000000000000000000000ff",
+      ausdDecimals: 6,
+      agentQuorumId: "agent_quorum_crash_test",
+    });
+    await new Promise<void>((resolve) => crashProneServer.listen(0, resolve));
+    const address = crashProneServer.address();
+    if (address === null || typeof address === "string") throw new Error("expected a bound port");
+    crashProneBaseUrl = `http://localhost:${address.port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => crashProneServer.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it("returns 500 for the failing request and stays up to serve the next one", async () => {
+    const failing = await fetch(`${crashProneBaseUrl}/users/sync`, {
+      method: "POST",
+      body: JSON.stringify({ userId: "user_flaky" }),
+    });
+    expect(failing.status).toBe(500);
+    const body = (await failing.json()) as { error: string; detail: string };
+    expect(body.error).toBe("internal error");
+    expect(body.detail).toContain("simulated network failure reaching Privy");
+
+    // The real proof: the server process is still alive and responsive —
+    // before this fix, the test runner itself would have crashed on the
+    // request above via an unhandled rejection, never reaching this line.
+    const healthy = await fetch(`${crashProneBaseUrl}/users/sync`, {
+      method: "POST",
+      body: JSON.stringify({ userId: "" }), // deliberately invalid, but a normal 400, not a crash
+    });
+    expect(healthy.status).toBe(400);
+  });
+});
