@@ -75,7 +75,7 @@ function Sidebar() {
             {balance !== undefined ? `$${balance}` : "—"}
           </div>
         </div>
-        <div style={{ fontSize: 10.5, color: theme.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>⛓ Scheduled by Chainlink CRE</div>
+        <div style={{ fontSize: 10.5, color: theme.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>⛓ Automated by Chainlink CRE</div>
         {walletAddress && (
           <div style={{ padding: 10, border: `1px solid ${theme.border}`, borderRadius: 4 }}>
             <div style={{ fontSize: 10.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 5 }}>Your wallet</div>

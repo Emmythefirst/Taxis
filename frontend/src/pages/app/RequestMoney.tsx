@@ -164,7 +164,7 @@ export function RequestMoney() {
         </div>
 
         <label style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 20 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted }}>What's it for? (optional)</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted }}>Note (optional)</span>
           <input
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
@@ -179,7 +179,7 @@ export function RequestMoney() {
           disabled={stage === "submitting"}
           style={{ width: "100%", padding: 14, background: theme.accent, color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 15, cursor: stage === "submitting" ? "default" : "pointer", opacity: stage === "submitting" ? 0.6 : 1 }}
         >
-          {stage === "submitting" ? "Creating…" : "Generate QR / link"}
+          {stage === "submitting" ? "Creating…" : "Create payment request"}
         </button>
       </div>
     </div>

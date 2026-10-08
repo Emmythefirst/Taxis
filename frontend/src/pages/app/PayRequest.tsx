@@ -15,8 +15,12 @@ type Stage = "loading" | "not-found" | "unpayable" | "own-request" | "insufficie
 /**
  * The PAYER's review/approve screen — reached either by scanning a QR
  * (ScanToPay.tsx), tapping a shared link directly, or being redirected
- * after Pay fails and retrying. Mirrors CheckoutDemo's old stage machine,
- * but the "merchant" here is just whoever generated the request.
+ * after Pay fails and retrying. Mirrors CheckoutDemo's old stage machine:
+ * the real AUSD quote (with its fee breakdown and short expiry) is fetched
+ * as soon as the request is confirmed payable — BEFORE the user sees a Pay
+ * button, not after tapping it — so "Pay" always means approving an exact,
+ * already-known total, never a blind commit. "Pay" itself then only does
+ * the owner-signed reattach + execute against that already-quoted checkout.
  */
 export function PayRequest() {
   const { requestId } = useParams<{ requestId: string }>();
@@ -27,6 +31,9 @@ export function PayRequest() {
 
   const [stage, setStage] = useState<Stage>("loading");
   const [request, setRequest] = useState<PaymentRequest | undefined>(undefined);
+  const [checkoutId, setCheckoutId] = useState<string | undefined>(undefined);
+  const [policyId, setPolicyId] = useState<string | undefined>(undefined);
+  const [agentQuorumId, setAgentQuorumId] = useState<string | undefined>(undefined);
   const [quoteExpiresAt, setQuoteExpiresAt] = useState<string | undefined>(undefined);
   const [feeAusd, setFeeAusd] = useState<number | undefined>(undefined);
   const [totalAusd, setTotalAusd] = useState<number | undefined>(undefined);
@@ -43,6 +50,7 @@ export function PayRequest() {
   async function loadRequest() {
     if (!requestId) return;
     setStage("loading");
+    setError(undefined);
     try {
       const { request: req } = await endpoints.getPaymentRequest(requestId);
       setRequest(req);
@@ -54,35 +62,37 @@ export function PayRequest() {
         setStage("unpayable");
         return;
       }
-      setStage("review");
+      await requestQuote(requestId);
     } catch (err) {
       setStage("not-found");
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  async function handlePay() {
-    if (!requestId) return;
-    setStage("processing");
-    setError(undefined);
+  async function requestQuote(id: string) {
     try {
-      const result = await endpoints.payPaymentRequest(requestId, userId);
+      const result = await endpoints.payPaymentRequest(id, userId);
       if (result.outcome === "INSUFFICIENT_BALANCE") {
         setStage("insufficient");
         return;
       }
+      setCheckoutId(result.checkout.id);
+      setPolicyId(result.policyId);
+      setAgentQuorumId(result.agentQuorumId);
       setQuoteExpiresAt(result.checkout.quote.expiresAt);
       setFeeAusd(Number(result.checkout.quote.feeAgentAusd) + Number(result.checkout.quote.feeNetworkAusd));
       setTotalAusd(Number(result.checkout.quote.ausdAmount));
-      await executePay(result.checkout.id, result.policyId, result.agentQuorumId);
+      setStage("review");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStage("error");
     }
   }
 
-  async function executePay(id: string, policy: string, agentQuorum: string) {
-    if (!walletAddress) return;
+  async function handlePay() {
+    if (!checkoutId || !policyId || !agentQuorumId || !walletAddress) return;
+    setStage("processing");
+    setError(undefined);
     try {
       // The real owner-signed "Approve payment" tap — same reattach
       // discipline as CheckoutDemo/Renew/Cancel: the agent quorum is
@@ -94,9 +104,9 @@ export function PayRequest() {
         removeSigners,
         walletAddress,
         continuity,
-        agent: { agentQuorumId: agentQuorum, policyId: policy },
+        agent: { agentQuorumId, policyId },
       });
-      const result = await endpoints.executeCheckout(id);
+      const result = await endpoints.executeCheckout(checkoutId);
       if (result.outcome === "SETTLED" || result.outcome === "PENDING_CONFIRMATION") {
         setDoneTxHash(result.txHash);
         await refresh();
@@ -127,7 +137,7 @@ export function PayRequest() {
     <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
       <h1 style={{ fontFamily: "'Unbounded',sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: "-0.01em", marginBottom: 24 }}>Pay request</h1>
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 26, textAlign: "center" }}>
-        {stage === "loading" && <div style={{ padding: "30px 0", color: theme.inkMuted, fontSize: 14 }}>Loading request…</div>}
+        {stage === "loading" && <div style={{ padding: "30px 0", color: theme.inkMuted, fontSize: 14 }}>Checking rate, fee, and your balance…</div>}
 
         {stage === "not-found" && (
           <div style={{ padding: "20px 0" }}>
@@ -171,22 +181,32 @@ export function PayRequest() {
           </div>
         )}
 
-        {stage === "review" && request && (
+        {stage === "review" && request && totalAusd !== undefined && feeAusd !== undefined && (
           <>
-            <div style={{ fontSize: 13, color: theme.inkMuted, marginBottom: 8 }}>Requesting</div>
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 600 }}>{formatLocalAmount(request.localAmount, request.localCurrency)}</div>
-            {request.memo && <div style={{ marginTop: 6, fontSize: 13.5, color: theme.inkMuted }}>{request.memo}</div>}
-            <div style={{ marginTop: 10, fontSize: 11.5, color: theme.inkMuted }}>
-              From {request.requesterAddress.slice(0, 6)}…{request.requesterAddress.slice(-4)}
+            <div style={{ fontSize: 13, color: theme.inkMuted, marginBottom: 8 }}>Paying</div>
+            <div style={{ fontSize: 15.5, fontWeight: 700 }}>
+              {request.requesterAddress.slice(0, 6)}…{request.requesterAddress.slice(-4)}
+            </div>
+            {request.memo && <div style={{ marginTop: 4, fontSize: 13.5, color: theme.inkMuted }}>{request.memo}</div>}
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 34, fontWeight: 600, marginTop: 16 }}>{formatUsd(totalAusd)}</div>
+            <div style={{ fontSize: 12, color: theme.warn, marginTop: 6 }}>Quote expires in {expiryLabel}</div>
+
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${theme.border}`, textAlign: "left" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Payment summary</div>
+              <SummaryRow theme={theme} label="Requested" value={formatLocalAmount(request.localAmount, request.localCurrency)} />
+              <SummaryRow theme={theme} label="Taxis fee" value={formatUsd(feeAusd)} />
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${theme.border}` }}>
+                <SummaryRow theme={theme} label="Total" value={formatUsd(totalAusd)} bold />
+              </div>
             </div>
 
-            <div style={{ marginTop: 14, fontSize: 11.5, color: theme.inkMuted }}>The exact AUSD amount (with fee) is locked in once you approve, same as any Taxis payment.</div>
+            <div style={{ marginTop: 14, fontSize: 11.5, color: theme.inkMuted }}>Paid with Taxis · AUSD (Agora) on Monad</div>
 
             <button
               onClick={handlePay}
               style={{ marginTop: 20, width: "100%", padding: 14, background: theme.accent, color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 15, cursor: "pointer" }}
             >
-              Pay
+              Pay {formatUsd(totalAusd)}
             </button>
             <div style={{ marginTop: 10, fontSize: 11.5, color: theme.inkMuted }}>🔒 You are approving this exact amount, once.</div>
           </>
@@ -195,10 +215,7 @@ export function PayRequest() {
         {stage === "processing" && (
           <div style={{ padding: "30px 0" }}>
             <div style={{ width: 36, height: 36, border: `3px solid ${theme.border}`, borderTopColor: theme.accent, borderRadius: "50%", margin: "0 auto", animation: "spin360 0.8s linear infinite" }} />
-            <div style={{ marginTop: 16, fontSize: 14, color: theme.inkMuted }}>
-              {totalAusd !== undefined ? `Sending ${formatUsd(totalAusd)}…` : "Preparing payment…"}
-            </div>
-            {feeAusd !== undefined && quoteExpiresAt && <div style={{ marginTop: 6, fontSize: 12, color: theme.inkMuted }}>Quote expires in {expiryLabel}</div>}
+            <div style={{ marginTop: 16, fontSize: 14, color: theme.inkMuted }}>{totalAusd !== undefined ? `Sending ${formatUsd(totalAusd)}…` : "Sending payment…"}</div>
           </div>
         )}
 
@@ -251,6 +268,15 @@ export function PayRequest() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function SummaryRow({ theme, label, value, bold }: { theme: ReturnType<typeof useAppTheme>["theme"]; label: string; value: string; bold?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: bold ? 0 : 6 }}>
+      <span style={{ fontSize: bold ? 13.5 : 13, color: bold ? theme.ink : theme.inkMuted, fontWeight: bold ? 700 : 400 }}>{label}</span>
+      <span style={{ fontSize: bold ? 13.5 : 13, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
     </div>
   );
 }
