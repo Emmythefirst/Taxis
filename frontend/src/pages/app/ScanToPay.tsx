@@ -63,7 +63,40 @@ export function ScanToPay() {
 
   return (
     <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
-      <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 18 }}>
+      {/*
+        html5-qrcode renders its own permission/camera-picker/file-upload UI
+        with hardcoded English strings ("Request Camera Permissions", "Scan
+        an Image File") that aren't overridable through its public API — but
+        every interactive element it creates DOES carry a stable, documented
+        hook for exactly this (confirmed from its own source,
+        ui/scanner/base.js's PublicUiElementIdAndClasses): every button/
+        select gets the class "html5-qrcode-element", so they can all be
+        rethemed at once without touching private internals. The one
+        non-public element retheme'd below (the small library-credit "i"
+        icon, no id/class of its own) is targeted by its alt text instead —
+        low risk since hiding a branding icon can't break scanning if that
+        attribute ever changes, unlike relying on the library's internal ids.
+      */}
+      <style>{`
+        #${SCANNER_ELEMENT_ID} { border: 1px solid ${theme.border} !important; border-radius: 6px !important; background: ${theme.surface}; overflow: hidden; }
+        #${SCANNER_ELEMENT_ID} img[alt="Info icon"] { display: none !important; }
+        #${SCANNER_ELEMENT_ID} .html5-qrcode-element {
+          font-family: inherit !important;
+          font-size: 13.5px !important;
+          font-weight: 600 !important;
+          padding: 10px 16px !important;
+          border-radius: 4px !important;
+          border: 1px solid ${theme.border} !important;
+          background: ${theme.accent} !important;
+          color: #fff !important;
+          cursor: pointer;
+        }
+      `}</style>
+      <div style={{ textAlign: "center", marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Scan a Taxis payment QR</div>
+        <div style={{ marginTop: 4, fontSize: 12.5, color: theme.inkMuted }}>Point your camera at the payment QR code</div>
+      </div>
+      <div style={{ padding: 18 }}>
         <div id={SCANNER_ELEMENT_ID} />
       </div>
 
