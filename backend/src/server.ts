@@ -29,6 +29,7 @@ import { openDb } from "./persistence/db.js";
 import { registerUsersRoutes, type UsersRouteDeps } from "./http/routes/users.js";
 import { registerObligationsRoutes, type ObligationsRouteDeps } from "./http/routes/obligations.js";
 import { registerCheckoutRoutes, type CheckoutRouteDeps } from "./http/routes/checkout.js";
+import { registerPaymentRequestRoutes, type PaymentRequestRouteDeps } from "./http/routes/paymentRequests.js";
 import { registerContinuityRoutes, type ContinuityRouteDeps } from "./http/routes/continuity.js";
 import { registerCreRoutes } from "./http/routes/cre.js";
 import { runDueCycles, staticMarketDataProvider, liveMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
@@ -60,6 +61,8 @@ export interface CreateServerOptions {
   execute?: RunDueCyclesDeps;
   /** When present, /checkout/* and /users/:id/balance are live. Omit to disable (503). */
   checkout?: CheckoutRouteDeps;
+  /** When present, /payment-requests/* (the P2P "request money" QR flow) are live. Omit to disable (503). */
+  paymentRequests?: PaymentRequestRouteDeps;
   /** When present, /users/:id/continuity* are live. Omit to disable (503) — the CONTINUITY quorum is optional infra (see .env.example). */
   continuity?: ContinuityRouteDeps;
 }
@@ -117,6 +120,16 @@ export function createTaxisServer(options: CreateServerOptions = {}) {
     router.post("/checkout/:id/execute", (ctx) => sendJson(ctx.res, 503, { error: "checkout not configured on this server" }));
   }
 
+  if (options.paymentRequests) {
+    registerPaymentRequestRoutes(router, db, options.paymentRequests);
+  } else {
+    router.post("/payment-requests", (ctx) => sendJson(ctx.res, 503, { error: "payment requests not configured on this server" }));
+    router.get("/payment-requests/:id", (ctx) => sendJson(ctx.res, 503, { error: "payment requests not configured on this server" }));
+    router.get("/users/:id/payment-requests", (ctx) => sendJson(ctx.res, 503, { error: "payment requests not configured on this server" }));
+    router.post("/payment-requests/:id/cancel", (ctx) => sendJson(ctx.res, 503, { error: "payment requests not configured on this server" }));
+    router.post("/payment-requests/:id/pay", (ctx) => sendJson(ctx.res, 503, { error: "payment requests not configured on this server" }));
+  }
+
   if (options.continuity) {
     registerContinuityRoutes(router, options.continuity);
   } else {
@@ -169,6 +182,7 @@ async function tryBuildLiveExecutionDeps(): Promise<{
   agentQuorumId: string;
   execute: RunDueCyclesDeps;
   checkout: CheckoutRouteDeps;
+  paymentRequests: PaymentRequestRouteDeps;
   continuity?: ContinuityRouteDeps;
 } | undefined> {
   try {
@@ -253,6 +267,17 @@ async function tryBuildLiveExecutionDeps(): Promise<{
         market,
         expirySeconds: Number(process.env.CHECKOUT_EXPIRY_SECONDS ?? "600"),
       },
+      paymentRequests: {
+        privy,
+        ausdAddress,
+        ausdDecimals,
+        quoteSigningPrivateKey,
+        agentQuorumId,
+        publicClient,
+        market,
+        quoteExpirySeconds: Number(process.env.CHECKOUT_EXPIRY_SECONDS ?? "600"),
+        requestExpirySeconds: Number(process.env.PAYMENT_REQUEST_EXPIRY_SECONDS ?? String(24 * 60 * 60)),
+      },
       continuity:
         continuityAgentPrivateKeyB64 && continuityQuorumId
           ? {
@@ -329,6 +354,7 @@ if (isMain) {
     agentQuorumId: live?.agentQuorumId,
     execute: live?.execute,
     checkout: live?.checkout,
+    paymentRequests: live?.paymentRequests,
     continuity: live?.continuity,
   });
   server.listen(port, () => {

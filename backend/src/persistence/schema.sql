@@ -37,6 +37,24 @@ CREATE TABLE IF NOT EXISTS recipients (
 );
 CREATE INDEX IF NOT EXISTS idx_recipients_user ON recipients(user_id);
 
+-- P2P payment requests (QR "pay me" links) — the reverse of a merchant
+-- Checkout: the REQUESTER creates this before any payer is known, so there's
+-- no FX lock/balance check yet (unlike checkouts.quote_json, which is only
+-- ever written once a specific payer's createCheckout() runs against it).
+CREATE TABLE IF NOT EXISTS payment_requests (
+  id TEXT PRIMARY KEY,
+  requester_user_id TEXT NOT NULL REFERENCES users(id),
+  requester_address TEXT NOT NULL,
+  local_amount REAL NOT NULL,
+  local_currency TEXT NOT NULL,
+  memo TEXT,
+  status TEXT NOT NULL CHECK (status IN ('PENDING', 'FULFILLED', 'EXPIRED', 'CANCELLED')),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  fulfilled_checkout_id TEXT REFERENCES checkouts(id)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_requests_requester ON payment_requests(requester_user_id);
+
 CREATE TABLE IF NOT EXISTS obligations (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -127,7 +145,10 @@ CREATE TABLE IF NOT EXISTS checkouts (
   reason TEXT,
   tx_hash TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  -- Set only when this checkout exists to fulfill a P2P payment_requests
+  -- row (see that table's header) — NULL for the merchant-demo flow.
+  payment_request_id TEXT REFERENCES payment_requests(id)
 );
 CREATE INDEX IF NOT EXISTS idx_checkouts_user ON checkouts(user_id);
 

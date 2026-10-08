@@ -12,6 +12,7 @@ interface CheckoutRow {
   tx_hash: string | null;
   created_at: string;
   updated_at: string;
+  payment_request_id: string | null;
 }
 
 function rowToCheckout(row: CheckoutRow): Checkout {
@@ -25,6 +26,7 @@ function rowToCheckout(row: CheckoutRow): Checkout {
     txHash: row.tx_hash ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    paymentRequestId: row.payment_request_id ?? undefined,
   };
 }
 
@@ -34,15 +36,26 @@ export interface InsertCheckoutParams {
   merchantAddress: Hex;
   quote: CheckoutQuote;
   policyId: string;
+  /** Set when this checkout exists to fulfill a P2P PaymentRequest. */
+  paymentRequestId?: string;
 }
 
 export function insertCheckout(db: Database.Database, params: InsertCheckoutParams): Checkout {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO checkouts (id, user_id, merchant_address, status, quote_json, policy_id, created_at, updated_at)
-     VALUES (@id, @userId, @merchantAddress, 'PENDING_APPROVAL', @quoteJson, @policyId, @createdAt, @updatedAt)`,
-  ).run({ ...params, quoteJson: JSON.stringify(params.quote), createdAt: now, updatedAt: now });
-  return { id: params.id, userId: params.userId, merchantAddress: params.merchantAddress, status: "PENDING_APPROVAL", quote: params.quote, createdAt: now, updatedAt: now };
+    `INSERT INTO checkouts (id, user_id, merchant_address, status, quote_json, policy_id, created_at, updated_at, payment_request_id)
+     VALUES (@id, @userId, @merchantAddress, 'PENDING_APPROVAL', @quoteJson, @policyId, @createdAt, @updatedAt, @paymentRequestId)`,
+  ).run({ ...params, quoteJson: JSON.stringify(params.quote), createdAt: now, updatedAt: now, paymentRequestId: params.paymentRequestId ?? null });
+  return {
+    id: params.id,
+    userId: params.userId,
+    merchantAddress: params.merchantAddress,
+    status: "PENDING_APPROVAL",
+    quote: params.quote,
+    createdAt: now,
+    updatedAt: now,
+    paymentRequestId: params.paymentRequestId,
+  };
 }
 
 export function getCheckout(db: Database.Database, id: string): Checkout | undefined {

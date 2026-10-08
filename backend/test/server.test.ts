@@ -312,6 +312,169 @@ describe("checkout endpoints", () => {
   });
 });
 
+describe("P2P payment request endpoints (QR 'pay me' flow)", () => {
+  it("503s on all payment-request routes when not configured", async () => {
+    const createRes = await fetch(`${baseUrl}/payment-requests`, { method: "POST" });
+    expect(createRes.status).toBe(503);
+    const getRes = await fetch(`${baseUrl}/payment-requests/some-id`);
+    expect(getRes.status).toBe(503);
+    const payRes = await fetch(`${baseUrl}/payment-requests/some-id/pay`, { method: "POST" });
+    expect(payRes.status).toBe(503);
+  });
+
+  describe("with payment requests configured", () => {
+    let prServer: Server;
+    let prBaseUrl: string;
+    let prDb: Database.Database;
+    let policyIds: string[];
+
+    beforeAll(async () => {
+      prDb = openDb(":memory:");
+      insertUser(prDb, "user_pr_requester");
+      setUserWallet(prDb, "user_pr_requester", "wallet_pr_requester", "0x0000000000000000000000000000000000000ee2");
+      insertUser(prDb, "user_pr_payer");
+      setUserWallet(prDb, "user_pr_payer", "wallet_pr_payer", "0x0000000000000000000000000000000000000ee3");
+      policyIds = [];
+
+      const fakePrivy = {
+        policies: () => ({
+          create: async () => {
+            const id = `policy_${policyIds.length + 1}`;
+            policyIds.push(id);
+            return { id };
+          },
+        }),
+        wallets: () => ({
+          ethereum: () => ({
+            sendTransaction: async () => ({ hash: "0xfeedface" }),
+          }),
+        }),
+      } as any;
+
+      const fakePublicClient = {
+        readContract: async ({ functionName }: { functionName: string }) => {
+          if (functionName === "balanceOf") return 100_000_000n; // 100 AUSD at 6 decimals
+          throw new Error(`fakePublicClient: unexpected functionName ${functionName}`);
+        },
+        waitForTransactionReceipt: async () => ({ status: "success" }),
+      } as any;
+
+      const sharedDeps = {
+        privy: fakePrivy,
+        ausdAddress: "0x000000000000000000000000000000000000ff" as const,
+        ausdDecimals: 6,
+        quoteSigningPrivateKey: `0x${"cd".repeat(32)}` as `0x${string}`,
+        agentQuorumId: "agent_quorum_test",
+        publicClient: fakePublicClient,
+        market: { getFxRate: () => 1500, getFees: () => ({ agentAusd: 0.5, networkAusd: 0.25 }) },
+      };
+
+      prServer = createTaxisServer({
+        db: prDb,
+        checkout: { ...sharedDeps, chainId: 10143, agentPrivateKeyB64: "unused-in-this-fake", expirySeconds: 600 },
+        paymentRequests: { ...sharedDeps, quoteExpirySeconds: 600, requestExpirySeconds: 86400 },
+      });
+      await new Promise<void>((resolve) => prServer.listen(0, resolve));
+      const address = prServer.address();
+      if (address === null || typeof address === "string") throw new Error("expected a bound port");
+      prBaseUrl = `http://localhost:${address.port}`;
+    });
+
+    afterAll(async () => {
+      await new Promise<void>((resolve, reject) => prServer.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it("creates a request, pays it as a different user, and executing settles it — marking the request FULFILLED", async () => {
+      const createRes = await fetch(`${prBaseUrl}/payment-requests`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_requester", localAmount: 15_000, localCurrency: "NGN", memo: "Lunch" }),
+      });
+      expect(createRes.status).toBe(200);
+      const createBody = (await createRes.json()) as { request: { id: string; status: string; requesterAddress: string } };
+      expect(createBody.request.status).toBe("PENDING");
+      expect(createBody.request.requesterAddress).toBe("0x0000000000000000000000000000000000000ee2");
+      const requestId = createBody.request.id;
+
+      // Fetching it (what scanning the QR / opening the link does) never
+      // moves money — just shows what's being asked for.
+      const getRes = await fetch(`${prBaseUrl}/payment-requests/${requestId}`);
+      expect(getRes.status).toBe(200);
+      const getBody = (await getRes.json()) as { request: { status: string } };
+      expect(getBody.request.status).toBe("PENDING");
+
+      const payRes = await fetch(`${prBaseUrl}/payment-requests/${requestId}/pay`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_payer" }),
+      });
+      expect(payRes.status).toBe(200);
+      const payBody = (await payRes.json()) as { outcome: string; checkout: { id: string }; policyId: string };
+      expect(payBody.outcome).toBe("QUOTED");
+
+      // Still PENDING — creating the checkout isn't proof it was ever
+      // actually approved/executed, same reasoning as every other
+      // confirm-before-retarget flow in this codebase.
+      const stillPendingRes = await fetch(`${prBaseUrl}/payment-requests/${requestId}`);
+      const stillPendingBody = (await stillPendingRes.json()) as { request: { status: string } };
+      expect(stillPendingBody.request.status).toBe("PENDING");
+
+      const execRes = await fetch(`${prBaseUrl}/checkout/${payBody.checkout.id}/execute`, { method: "POST" });
+      expect(execRes.status).toBe(200);
+      const execBody = (await execRes.json()) as { outcome: string };
+      expect(execBody.outcome).toBe("SETTLED");
+
+      const fulfilledRes = await fetch(`${prBaseUrl}/payment-requests/${requestId}`);
+      const fulfilledBody = (await fulfilledRes.json()) as { request: { status: string; fulfilledCheckoutId: string } };
+      expect(fulfilledBody.request.status).toBe("FULFILLED");
+      expect(fulfilledBody.request.fulfilledCheckoutId).toBe(payBody.checkout.id);
+    });
+
+    it("rejects paying your own request", async () => {
+      const createRes = await fetch(`${prBaseUrl}/payment-requests`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_requester", localAmount: 5_000, localCurrency: "NGN" }),
+      });
+      const { request } = (await createRes.json()) as { request: { id: string } };
+
+      const payRes = await fetch(`${prBaseUrl}/payment-requests/${request.id}/pay`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_requester" }),
+      });
+      expect(payRes.status).toBe(400);
+    });
+
+    it("rejects paying an already-cancelled request", async () => {
+      const createRes = await fetch(`${prBaseUrl}/payment-requests`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_requester", localAmount: 5_000, localCurrency: "NGN" }),
+      });
+      const { request } = (await createRes.json()) as { request: { id: string } };
+
+      const wrongCancelRes = await fetch(`${prBaseUrl}/payment-requests/${request.id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_payer" }),
+      });
+      expect(wrongCancelRes.status).toBe(403);
+
+      const cancelRes = await fetch(`${prBaseUrl}/payment-requests/${request.id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_requester" }),
+      });
+      expect(cancelRes.status).toBe(200);
+
+      const payRes = await fetch(`${prBaseUrl}/payment-requests/${request.id}/pay`, {
+        method: "POST",
+        body: JSON.stringify({ userId: "user_pr_payer" }),
+      });
+      expect(payRes.status).toBe(400);
+    });
+
+    it("404s for an unknown request id", async () => {
+      const res = await fetch(`${prBaseUrl}/payment-requests/does-not-exist`);
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
 describe("continuity endpoints", () => {
   it("503s on setup/grant, but GET status still reports not-configured, when continuity isn't configured", async () => {
     const statusRes = await fetch(`${baseUrl}/users/does-not-matter/continuity`);

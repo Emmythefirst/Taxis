@@ -20,6 +20,7 @@ import { formatBaseUnitsToDecimal } from "../../domain/units.js";
 import { ERC20_ABI } from "../../privy/erc20.js";
 import { getCheckout, getCheckoutPolicyId } from "../../persistence/checkouts.js";
 import { retargetActiveGrantsPolicyId } from "../../persistence/grants.js";
+import { updatePaymentRequestStatus } from "../../persistence/paymentRequests.js";
 import type { MarketDataProvider } from "../../pricing/marketData.js";
 import type { Hex } from "../../domain/types.js";
 import { randomUUID } from "node:crypto";
@@ -127,6 +128,13 @@ export function registerCheckoutRoutes(router: Router, db: Database.Database, de
       if (result.outcome === "SETTLED" || result.outcome === "PENDING_CONFIRMATION") {
         const policyId = getCheckoutPolicyId(db, checkoutId);
         if (policyId) retargetActiveGrantsPolicyId(db, checkout.userId, "CYCLE", policyId);
+        // Same proof-required-before-updating discipline as the retarget
+        // above — only mark the originating P2P request FULFILLED once the
+        // transfer actually broadcast, never when /pay merely created the
+        // checkout.
+        if (checkout.paymentRequestId) {
+          updatePaymentRequestStatus(db, checkout.paymentRequestId, "FULFILLED", { fulfilledCheckoutId: checkoutId });
+        }
       }
       sendJson(ctx.res, 200, result);
     } catch (err) {

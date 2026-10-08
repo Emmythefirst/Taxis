@@ -53,4 +53,9 @@ function migrate(db: Database.Database): void {
   if (!cycleColumns.some((c) => c.name === "tx_hash")) {
     db.exec(`ALTER TABLE cycles ADD COLUMN tx_hash TEXT`);
   }
+
+  const checkoutColumns = db.prepare(`PRAGMA table_info(checkouts)`).all() as Array<{ name: string }>;
+  if (!checkoutColumns.some((c) => c.name === "payment_request_id")) {
+    db.exec(`ALTER TABLE checkouts ADD COLUMN payment_request_id TEXT`);
+  }
 }

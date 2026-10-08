@@ -34,6 +34,9 @@ export interface CreateCheckoutParams {
   merchantAddress: Hex;
   localAmount: number;
   localCurrency: string;
+  /** Set when this checkout exists to fulfill a P2P PaymentRequest — see
+   *  http/routes/paymentRequests.ts's /pay handler. */
+  paymentRequestId?: string;
 }
 
 export interface CreateCheckoutDeps {
@@ -103,6 +106,7 @@ export async function createCheckout(deps: CreateCheckoutDeps, params: CreateChe
     merchantAddress: params.merchantAddress,
     quote: result.quote,
     policyId,
+    paymentRequestId: params.paymentRequestId,
   });
 
   return { outcome: "QUOTED", checkout, policyId };

@@ -139,6 +139,36 @@ export interface Checkout {
   txHash?: string;
   createdAt: string;
   updatedAt: string;
+  /** Set only when this checkout exists to fulfill a PaymentRequest (the
+   *  P2P "scan to pay" flow) — undefined for the merchant-demo flow. */
+  paymentRequestId?: string;
+}
+
+export const PAYMENT_REQUEST_STATUSES = ["PENDING", "FULFILLED", "EXPIRED", "CANCELLED"] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
+
+/**
+ * A P2P "request money" link/QR — any Taxis user can generate one asking to
+ * be paid a specific amount, and any other Taxis user can fulfill it. This
+ * is the reverse direction of a merchant Checkout: here the REQUESTER
+ * creates the record before anyone's agreed to pay, so unlike CheckoutQuote
+ * there's no FX lock or balance check yet at creation time — those only
+ * happen once a payer is known (http/routes/paymentRequests.ts's /pay step,
+ * which reuses engine/checkoutEngine.ts's createCheckout() with the
+ * requester's own address as the recipient).
+ */
+export interface PaymentRequest {
+  id: string;
+  requesterUserId: string;
+  requesterAddress: Hex;
+  localAmount: number;
+  localCurrency: string;
+  memo?: string;
+  status: PaymentRequestStatus;
+  createdAt: string;
+  expiresAt: string;
+  /** Set once a payer's checkout against this request actually settles. */
+  fulfilledCheckoutId?: string;
 }
 
 export const CYCLE_STATES = [
