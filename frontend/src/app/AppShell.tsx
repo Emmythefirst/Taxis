@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { to: "/app", glyph: "⌂", label: "Home", end: true },
   { to: "/app/payments", glyph: "↻", label: "Payments", end: false },
   { to: "/app/activity", glyph: "≡", label: "Activity", end: false },
-  { to: "/app/checkout", glyph: "⊙", label: "Checkout", end: false },
+  { to: "/app/pay", glyph: "⊙", label: "Pay", end: false },
   { to: "/app/settings", glyph: "⚙", label: "Settings", end: false },
 ];
 

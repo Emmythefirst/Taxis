@@ -8,7 +8,8 @@ import { NewPayment } from "./pages/app/NewPayment";
 import { QuoteView } from "./pages/app/QuoteView";
 import { ActivityList } from "./pages/app/ActivityList";
 import { Explain } from "./pages/app/Explain";
-import { CheckoutDemo } from "./pages/app/CheckoutDemo";
+import { PayHub } from "./pages/app/PayHub";
+import { PayRequest } from "./pages/app/PayRequest";
 import { Settings } from "./pages/app/Settings";
 import { ContinuitySetup } from "./pages/app/ContinuitySetup";
 
@@ -24,7 +25,8 @@ function App() {
         <Route path="obligations/:obligationId/quotes/:cycleId" element={<QuoteView />} />
         <Route path="activity" element={<ActivityList />} />
         <Route path="activity/:kind/:id" element={<Explain />} />
-        <Route path="checkout" element={<CheckoutDemo />} />
+        <Route path="pay" element={<PayHub />} />
+        <Route path="pay/:requestId" element={<PayRequest />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/continuity" element={<ContinuitySetup />} />
       </Route>

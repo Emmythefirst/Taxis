@@ -29,7 +29,7 @@ const FEATURES = [
   { glyph: "↻", title: "Recurring payments, anywhere", desc: "Pay someone in another country every month without redoing the setup." },
   { glyph: "▦", title: "Limits that actually hold", desc: "Your cap and rate tolerance aren't a suggestion. Outside them, it waits for you." },
   { glyph: "≡", title: "A receipt, every time", desc: "See exactly why a payment went through, or why it didn't, in plain language." },
-  { glyph: "⊙", title: "Merchant checkout", desc: "Use the same balance to pay for things directly. No separate wallet to juggle." },
+  { glyph: "⊙", title: "Request or pay anyone", desc: "Generate a QR to get paid, or scan one to pay — same balance, no separate wallet to juggle." },
   { glyph: "↪", title: "Backup recipient", desc: "Go quiet for a while and payments can redirect to someone you chose ahead of time." },
   { glyph: "✕", title: "One-tap stop", desc: "Cut off Taxis's access instantly, anytime. No waiting, no support ticket." },
 ];

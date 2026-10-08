@@ -226,10 +226,10 @@ export function Dashboard() {
           + New payment
         </button>
         <button
-          onClick={() => navigate("/app/checkout")}
+          onClick={() => navigate("/app/pay")}
           style={{ flex: 1, padding: 14, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, fontWeight: 600, fontSize: 14, cursor: "pointer", color: theme.ink }}
         >
-          Checkout demo
+          Request or pay someone
         </button>
       </div>
 

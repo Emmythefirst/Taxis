@@ -80,6 +80,22 @@ export interface Checkout {
   txHash?: string;
   createdAt: string;
   updatedAt: string;
+  paymentRequestId?: string;
+}
+
+export type PaymentRequestStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED";
+
+export interface PaymentRequest {
+  id: string;
+  requesterUserId: string;
+  requesterAddress: Hex;
+  localAmount: number;
+  localCurrency: string;
+  memo?: string;
+  status: PaymentRequestStatus;
+  createdAt: string;
+  expiresAt: string;
+  fulfilledCheckoutId?: string;
 }
 
 export type CycleState =

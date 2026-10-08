@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { Cadence, Checkout, Grant, Hex, ObligationEnvelope, Recipient, Cycle } from "../types";
+import type { Cadence, Checkout, Grant, Hex, ObligationEnvelope, PaymentRequest, Recipient, Cycle } from "../types";
 
 export interface SyncUserResult {
   userId: string;
@@ -129,6 +129,30 @@ export type ExecuteCheckoutResult =
 
 export function executeCheckout(checkoutId: string): Promise<ExecuteCheckoutResult> {
   return api.post(`/checkout/${checkoutId}/execute`);
+}
+
+export function createPaymentRequest(userId: string, params: { localAmount: number; localCurrency: string; memo?: string }): Promise<{ request: PaymentRequest }> {
+  return api.post("/payment-requests", { userId, ...params });
+}
+
+export function getPaymentRequest(requestId: string): Promise<{ request: PaymentRequest }> {
+  return api.get(`/payment-requests/${requestId}`);
+}
+
+export function listMyPaymentRequests(userId: string): Promise<{ requests: PaymentRequest[] }> {
+  return api.get(`/users/${userId}/payment-requests`);
+}
+
+export function cancelPaymentRequest(requestId: string, userId: string): Promise<{ requestId: string; status: string }> {
+  return api.post(`/payment-requests/${requestId}/cancel`, { userId });
+}
+
+export type PayPaymentRequestResult =
+  | { outcome: "QUOTED"; checkout: Checkout; policyId: string; agentQuorumId: string; request: PaymentRequest }
+  | { outcome: "INSUFFICIENT_BALANCE"; reason: string };
+
+export function payPaymentRequest(requestId: string, userId: string): Promise<PayPaymentRequestResult> {
+  return api.post(`/payment-requests/${requestId}/pay`, { userId });
 }
 
 export interface ContinuityStatus {
