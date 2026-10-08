@@ -66,6 +66,15 @@ export function Dashboard() {
       });
   }, [obligations, recipientById, cycles]);
 
+  // Previously, a cycle needing review only showed up as a subtle warn-
+  // colored left border on its row further down the page (or on Payments) —
+  // nothing a user landing on Home would actually notice, especially since
+  // these quotes carry their own short expiry (Section A.3) and can lapse
+  // unreviewed. A banner at the very top states it plainly and links
+  // straight to the single due cycle when there's exactly one, since that's
+  // the common case and saves a click.
+  const needsReviewCycles = useMemo(() => cycles.filter(({ cycle }) => cycle.state === "REQUIRES_APPROVAL"), [cycles]);
+
   const renewalNeeded = useMemo(() => {
     return obligations
       .filter((o) => o.status === "ACTIVE")
@@ -94,6 +103,38 @@ export function Dashboard() {
   return (
     <div style={{ animation: "fadeUp 0.4s ease both" }}>
       <h1 style={{ fontFamily: "'Unbounded',sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: "-0.01em" }}>{greeting()}</h1>
+
+      {needsReviewCycles.length > 0 && (
+        <div
+          style={{
+            marginTop: 20,
+            padding: "14px 16px",
+            background: pillColors(theme, dark, "warn").bg,
+            border: `1px solid ${theme.warn}`,
+            borderRadius: 4,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 13.5, color: theme.warn, fontWeight: 600 }}>
+            ⚠ {needsReviewCycles.length === 1
+              ? `${recipientLabelForObligation(needsReviewCycles[0]!.obligationId)}'s payment needs your approval`
+              : `${needsReviewCycles.length} payments need your approval`}
+          </div>
+          <button
+            onClick={() =>
+              needsReviewCycles.length === 1
+                ? navigate(`/app/obligations/${needsReviewCycles[0]!.obligationId}/quotes/${needsReviewCycles[0]!.cycle.id}`)
+                : navigate("/app/payments")
+            }
+            style={{ padding: "8px 14px", background: theme.warn, color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 13, cursor: "pointer", flexShrink: 0 }}
+          >
+            Review now
+          </button>
+        </div>
+      )}
 
       {renewalNeeded && (
         <div
