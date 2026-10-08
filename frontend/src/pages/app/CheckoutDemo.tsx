@@ -5,6 +5,7 @@ import { useAppData } from "../../app/AppDataContext";
 import { useCountdown } from "../../app/useCountdown";
 import { formatUsd } from "../../app/format";
 import { explorerTxUrl } from "../../app/explorer";
+import { reattachAgentSigner } from "../../app/reattachSigners";
 import * as endpoints from "../../api/endpoints";
 import type { Hex } from "../../types";
 
@@ -16,8 +17,8 @@ type Stage = "loading" | "insufficient" | "review" | "processing" | "done" | "er
 
 export function CheckoutDemo() {
   const { theme } = useAppTheme();
-  const { userId, walletAddress, refresh } = useAppData();
-  const { addSigners } = useSigners();
+  const { userId, walletAddress, continuity, refresh } = useAppData();
+  const { addSigners, removeSigners } = useSigners();
 
   const [stage, setStage] = useState<Stage>("loading");
   const [checkoutId, setCheckoutId] = useState<string | undefined>(undefined);
@@ -83,8 +84,18 @@ export function CheckoutDemo() {
     try {
       // The real owner-signed "Approve payment" tap (Section A.4 step 8) —
       // a fresh, live authorization for this exact merchant + amount, not a
-      // durable grant like a recurring obligation's.
-      await addSigners({ address: walletAddress, signers: [{ signerId: agentQuorumId, policyIds: [policyId] }] });
+      // durable grant like a recurring obligation's. Goes through
+      // reattachAgentSigner() rather than a raw addSigners() call — the
+      // agent quorum is almost always already attached from an existing
+      // obligation, and addSigners() rejects re-adding an already-attached
+      // signerId outright (see reattachSigners.ts).
+      await reattachAgentSigner({
+        addSigners,
+        removeSigners,
+        walletAddress,
+        continuity,
+        agent: { agentQuorumId, policyId },
+      });
       const result = await endpoints.executeCheckout(checkoutId);
       if (result.outcome === "SETTLED") {
         setDoneTxHash(result.txHash);
