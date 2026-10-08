@@ -1,55 +1,97 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 import { useAppTheme } from "../../app/ThemeContext";
 import { parsePaymentRequestId } from "../../app/paymentRequestLink";
 
 const SCANNER_ELEMENT_ID = "taxis-qr-scanner";
 
+type CameraState = "starting" | "scanning" | "unavailable";
+
 /**
  * The PAYER's entry point for scanning someone else's request QR. A plain
  * tapped link (no camera at all) reaches the exact same destination —
  * /app/pay/:requestId — this is just the camera-based convenience for the
- * in-person case. html5-qrcode's Html5QrcodeScanner renders its own
- * permission/camera-picker UI into the target div; we only own the
- * container and the success callback.
+ * in-person case.
+ *
+ * Deliberately uses the low-level `Html5Qrcode` class rather than
+ * `Html5QrcodeScanner` (the batteries-included widget used in the first
+ * version of this screen): the widget renders its own "Request Camera
+ * Permissions" button and makes you tap it before anything happens, which
+ * read as an extra, dev-tool-looking step. The camera here starts itself —
+ * `.start()` is called the moment this screen mounts, which is also what
+ * triggers the browser's own native permission prompt the first time —  so
+ * there's nothing to tap through before scanning. Uploading an image
+ * instead stays available as a plain secondary link, not a competing
+ * primary button, and only takes over the scan surface (stopping the live
+ * camera first) when actually used.
  */
 export function ScanToPay() {
   const { theme } = useAppTheme();
   const navigate = useNavigate();
+  const [cameraState, setCameraState] = useState<CameraState>("starting");
   const [manualInput, setManualInput] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
-  const scannerRef = useRef<Html5QrcodeScanner | undefined>(undefined);
+  const qrRef = useRef<Html5Qrcode | undefined>(undefined);
   const navigatedRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const scanner = new Html5QrcodeScanner(SCANNER_ELEMENT_ID, { fps: 10, qrbox: 230 }, false);
-    scannerRef.current = scanner;
-    scanner.render(
-      (decodedText) => {
-        if (navigatedRef.current) return;
-        const requestId = parsePaymentRequestId(decodedText);
-        if (!requestId) {
-          setError("That QR doesn't look like a Taxis payment request.");
-          return;
-        }
-        navigatedRef.current = true;
-        void scanner.clear();
-        navigate(`/app/pay/${requestId}`);
-      },
+    const qr = new Html5Qrcode(SCANNER_ELEMENT_ID, false);
+    qrRef.current = qr;
+
+    function onDecoded(decodedText: string) {
+      if (navigatedRef.current) return;
+      const requestId = parsePaymentRequestId(decodedText);
+      if (!requestId) {
+        setError("That QR doesn't look like a Taxis payment request.");
+        return;
+      }
+      navigatedRef.current = true;
+      void qr.stop().catch(() => {});
+      navigate(`/app/pay/${requestId}`);
+    }
+
+    qr.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 230 },
+      onDecoded,
       () => {
         // Per-frame "nothing decoded yet" callback — expected continuously
-        // while the camera is pointed at anything that isn't a QR code, not
-        // a real error worth surfacing.
+        // while the camera is pointed at anything that isn't a QR code.
       },
-    );
+    )
+      .then(() => setCameraState("scanning"))
+      .catch(() => setCameraState("unavailable"));
 
     return () => {
-      void scannerRef.current?.clear().catch(() => {
-        // Already cleared/torn down — nothing to do.
-      });
+      navigatedRef.current = true;
+      if (qr.isScanning) {
+        void qr.stop().then(() => qr.clear()).catch(() => qr.clear());
+      } else {
+        qr.clear();
+      }
     };
   }, [navigate]);
+
+  async function handleFileChosen(file: File | undefined) {
+    if (!file || !qrRef.current) return;
+    setError(undefined);
+    const qr = qrRef.current;
+    try {
+      if (qr.isScanning) await qr.stop();
+      const result = await qr.scanFileV2(file, false);
+      const requestId = parsePaymentRequestId(result.decodedText);
+      if (!requestId) {
+        setError("Couldn't find a Taxis payment QR in that image.");
+        return;
+      }
+      navigatedRef.current = true;
+      navigate(`/app/pay/${requestId}`);
+    } catch {
+      setError("Couldn't find a QR code in that image.");
+    }
+  }
 
   function handleManualSubmit() {
     setError(undefined);
@@ -62,43 +104,57 @@ export function ScanToPay() {
   }
 
   return (
-    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
-      {/*
-        html5-qrcode renders its own permission/camera-picker/file-upload UI
-        with hardcoded English strings ("Request Camera Permissions", "Scan
-        an Image File") that aren't overridable through its public API — but
-        every interactive element it creates DOES carry a stable, documented
-        hook for exactly this (confirmed from its own source,
-        ui/scanner/base.js's PublicUiElementIdAndClasses): every button/
-        select gets the class "html5-qrcode-element", so they can all be
-        rethemed at once without touching private internals. The one
-        non-public element retheme'd below (the small library-credit "i"
-        icon, no id/class of its own) is targeted by its alt text instead —
-        low risk since hiding a branding icon can't break scanning if that
-        attribute ever changes, unlike relying on the library's internal ids.
-      */}
-      <style>{`
-        #${SCANNER_ELEMENT_ID} { border: 1px solid ${theme.border} !important; border-radius: 6px !important; background: ${theme.surface}; overflow: hidden; }
-        #${SCANNER_ELEMENT_ID} img[alt="Info icon"] { display: none !important; }
-        #${SCANNER_ELEMENT_ID} .html5-qrcode-element {
-          font-family: inherit !important;
-          font-size: 13.5px !important;
-          font-weight: 600 !important;
-          padding: 10px 16px !important;
-          border-radius: 4px !important;
-          border: 1px solid ${theme.border} !important;
-          background: ${theme.accent} !important;
-          color: #fff !important;
-          cursor: pointer;
-        }
-      `}</style>
+    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 520 }}>
       <div style={{ textAlign: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Scan a Taxis payment QR</div>
-        <div style={{ marginTop: 4, fontSize: 12.5, color: theme.inkMuted }}>Point your camera at the payment QR code</div>
+        <div style={{ marginTop: 4, fontSize: 12.5, color: theme.inkMuted }}>
+          {cameraState === "unavailable" ? "Camera access isn't available — upload an image instead." : "Point your camera at the payment QR code"}
+        </div>
       </div>
-      <div style={{ padding: 18 }}>
-        <div id={SCANNER_ELEMENT_ID} />
+
+      <div
+        style={{
+          position: "relative",
+          background: theme.surface,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 6,
+          overflow: "hidden",
+          minHeight: 260,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div id={SCANNER_ELEMENT_ID} style={{ width: "100%" }} />
+        {cameraState === "starting" && <div style={{ position: "absolute", fontSize: 13, color: theme.inkMuted }}>Starting camera…</div>}
+        {cameraState === "unavailable" && (
+          <div style={{ position: "absolute", textAlign: "center", padding: "0 20px" }}>
+            <div style={{ fontSize: 13, color: theme.inkMuted, marginBottom: 12 }}>Enable camera access in your browser, or upload a QR image below.</div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{ padding: "10px 18px", border: `1px solid ${theme.border}`, borderRadius: 4, background: "transparent", color: theme.ink, fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}
+            >
+              Upload QR image
+            </button>
+          </div>
+        )}
       </div>
+
+      {cameraState === "scanning" && (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{ display: "block", margin: "12px auto 0", background: "none", border: "none", color: theme.inkMuted, fontSize: 12.5, cursor: "pointer", textDecoration: "underline" }}
+        >
+          Upload QR image instead
+        </button>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => void handleFileChosen(e.target.files?.[0])}
+      />
 
       <div style={{ marginTop: 18, fontSize: 12.5, color: theme.inkMuted, textAlign: "center" }}>— or —</div>
 
@@ -117,7 +173,7 @@ export function ScanToPay() {
         </button>
       </div>
 
-      {error && <p style={{ marginTop: 12, fontSize: 13, color: theme.warn }}>{error}</p>}
+      {error && <p style={{ marginTop: 12, fontSize: 13, color: theme.warn, textAlign: "center" }}>{error}</p>}
     </div>
   );
 }

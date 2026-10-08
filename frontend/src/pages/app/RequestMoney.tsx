@@ -1,13 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toDataURL } from "qrcode";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
 import { COUNTRY_OPTIONS } from "../../app/countries";
 import { paymentRequestPayUrl } from "../../app/paymentRequestLink";
-import { formatLocalAmount } from "../../app/format";
+import { formatLocalAmount, formatDateTime } from "../../app/format";
+import { pillColors } from "../../theme/theme";
 import * as endpoints from "../../api/endpoints";
+import type { PaymentRequest, PaymentRequestStatus } from "../../types";
 
 type Stage = "form" | "submitting" | "ready";
+
+const STATUS_LABEL: Record<PaymentRequestStatus, string> = {
+  PENDING: "Waiting for payment",
+  FULFILLED: "Paid",
+  CANCELLED: "Cancelled",
+  EXPIRED: "Expired",
+};
+
+const STATUS_KIND: Record<PaymentRequestStatus, "success" | "warn" | "neutral"> = {
+  PENDING: "neutral",
+  FULFILLED: "success",
+  CANCELLED: "neutral",
+  EXPIRED: "warn",
+};
 
 /**
  * The REQUESTER side of the P2P flow — generates a QR/link asking to be
@@ -18,7 +34,7 @@ type Stage = "form" | "submitting" | "ready";
  * lightweight request record itself.
  */
 export function RequestMoney() {
-  const { theme } = useAppTheme();
+  const { theme, dark } = useAppTheme();
   const { userId, refresh } = useAppData();
 
   const [stage, setStage] = useState<Stage>("form");
@@ -29,9 +45,25 @@ export function RequestMoney() {
   const [qrDataUrl, setQrDataUrl] = useState<string | undefined>(undefined);
   const [payUrl, setPayUrl] = useState<string | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  const [requests, setRequests] = useState<PaymentRequest[]>([]);
+  const [cancellingId, setCancellingId] = useState<string | undefined>(undefined);
 
   const selectedCountry = COUNTRY_OPTIONS.find((c) => c.name === country) ?? COUNTRY_OPTIONS[0]!;
   const amountNumber = Number(amount);
+
+  useEffect(() => {
+    void loadRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadRequests() {
+    try {
+      const { requests: list } = await endpoints.listMyPaymentRequests(userId);
+      setRequests(list);
+    } catch {
+      // Non-fatal — the create flow above doesn't depend on this list.
+    }
+  }
 
   async function handleCreate() {
     setError(undefined);
@@ -48,10 +80,21 @@ export function RequestMoney() {
       setPayUrl(url);
       setQrDataUrl(await toDataURL(url, { margin: 1, width: 240 }));
       await refresh();
+      await loadRequests();
       setStage("ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStage("form");
+    }
+  }
+
+  async function handleCancelRequest(requestId: string) {
+    setCancellingId(requestId);
+    try {
+      await endpoints.cancelPaymentRequest(requestId, userId);
+      await loadRequests();
+    } finally {
+      setCancellingId(undefined);
     }
   }
 
@@ -90,9 +133,46 @@ export function RequestMoney() {
     setError(undefined);
   }
 
+  const requestsList = requests.length > 0 && (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted, marginBottom: 10 }}>Your requests</div>
+      <div style={{ display: "flex", flexDirection: "column", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
+        {requests.map((r) => {
+          const colors = pillColors(theme, dark, STATUS_KIND[r.status]);
+          return (
+            <div
+              key={r.id}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${theme.border}`, background: theme.surface }}
+            >
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{formatLocalAmount(r.localAmount, r.localCurrency)}</div>
+                <div style={{ fontSize: 12, color: theme.inkMuted, marginTop: 2 }}>
+                  {r.memo ? `${r.memo} · ` : ""}
+                  {formatDateTime(r.createdAt)}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 12, background: colors.bg, color: colors.color }}>{STATUS_LABEL[r.status]}</span>
+                {r.status === "PENDING" && (
+                  <button
+                    onClick={() => handleCancelRequest(r.id)}
+                    disabled={cancellingId === r.id}
+                    style={{ background: "none", border: "none", color: theme.inkMuted, fontSize: 12, cursor: cancellingId === r.id ? "default" : "pointer" }}
+                  >
+                    {cancellingId === r.id ? "Cancelling…" : "Cancel"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   if (stage === "ready" && qrDataUrl && payUrl) {
     return (
-      <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
+      <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 520 }}>
         <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 26, textAlign: "center" }}>
           <div style={{ fontSize: 13, color: theme.inkMuted, marginBottom: 4 }}>Requesting</div>
           <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 30, fontWeight: 600 }}>{formatLocalAmount(amountNumber, selectedCountry.currency)}</div>
@@ -121,12 +201,14 @@ export function RequestMoney() {
             ← Request something else
           </button>
         </div>
+
+        {requestsList}
       </div>
     );
   }
 
   return (
-    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
+    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 520 }}>
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 26 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted }}>Amount</span>
@@ -182,6 +264,8 @@ export function RequestMoney() {
           {stage === "submitting" ? "Creating…" : "Create payment request"}
         </button>
       </div>
+
+      {requestsList}
     </div>
   );
 }

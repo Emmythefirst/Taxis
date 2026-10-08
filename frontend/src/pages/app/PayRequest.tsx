@@ -134,7 +134,7 @@ export function PayRequest() {
   }
 
   return (
-    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 420 }}>
+    <div style={{ animation: "fadeUp 0.4s ease both", maxWidth: 520 }}>
       <h1 style={{ fontFamily: "'Unbounded',sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: "-0.01em", marginBottom: 24 }}>Pay request</h1>
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, padding: 26, textAlign: "center" }}>
         {stage === "loading" && <div style={{ padding: "30px 0", color: theme.inkMuted, fontSize: 14 }}>Checking rate, fee, and your balance…</div>}
