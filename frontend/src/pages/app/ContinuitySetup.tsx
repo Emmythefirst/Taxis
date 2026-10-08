@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSigners } from "@privy-io/react-auth";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
 import { reattachContinuitySigner } from "../../app/reattachSigners";
+import { COUNTRY_OPTIONS } from "../../app/countries";
 import * as endpoints from "../../api/endpoints";
+import type { Hex } from "../../types";
 
 const INACTIVITY_OPTIONS = [30, 60, 90] as const;
 
@@ -22,22 +24,47 @@ export function ContinuitySetup() {
   const { addSigners, removeSigners } = useSigners();
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState<"existing" | "new">(recipients.length > 0 ? "existing" : "new");
   const [backupRecipientId, setBackupRecipientId] = useState<string | undefined>(recipients[0]?.id);
+  const [newLabel, setNewLabel] = useState("");
+  const [newPayoutAddress, setNewPayoutAddress] = useState("");
+  const [newCountry, setNewCountry] = useState(COUNTRY_OPTIONS[0]!.name);
   const [inactivityDays, setInactivityDays] = useState<(typeof INACTIVITY_OPTIONS)[number]>(60);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [done, setDone] = useState(false);
 
   const activeObligations = obligations.filter((o) => o.status === "ACTIVE");
+  const newCountryOption = COUNTRY_OPTIONS.find((c) => c.name === newCountry) ?? COUNTRY_OPTIONS[0]!;
 
   async function handleSubmit() {
     setError(undefined);
-    if (!backupRecipientId) return setError("Choose a backup recipient.");
     if (!walletAddress) return setError("Your wallet isn't linked yet.");
+    if (mode === "new" && !newLabel.trim()) return setError("Enter a name for this wallet.");
+    if (mode === "new" && !/^0x[0-9a-fA-F]{40}$/.test(newPayoutAddress.trim())) return setError("Enter a valid wallet address (0x… 40 hex characters).");
+    if (mode === "existing" && !backupRecipientId) return setError("Choose a backup recipient.");
 
     setSubmitting(true);
     try {
-      const setup = await endpoints.setupContinuity(userId, { backupRecipientId, inactivityThresholdDays: inactivityDays });
+      // A backup recipient doesn't need to be someone you've already paid
+      // — unlike New Payment's recipients, continuity's whole point is
+      // protecting against the case where YOU go quiet, so the trusted
+      // person on the other end may never have been set up as a regular
+      // recipient. Create the recipient record inline (same endpoint New
+      // Payment already uses) when entering a fresh wallet, then proceed
+      // exactly as if it had been picked from the existing list.
+      const resolvedBackupRecipientId =
+        mode === "new"
+          ? (
+              await endpoints.createRecipient(userId, {
+                label: newLabel.trim(),
+                payoutAddress: newPayoutAddress.trim() as Hex,
+                localCurrency: newCountryOption.currency,
+              })
+            ).recipient.id
+          : backupRecipientId!;
+
+      const setup = await endpoints.setupContinuity(userId, { backupRecipientId: resolvedBackupRecipientId, inactivityThresholdDays: inactivityDays });
 
       // The real, distinct owner-signed tap — against the CONTINUITY
       // quorum specifically, never the day-to-day agent one. Goes through
@@ -93,68 +120,126 @@ export function ContinuitySetup() {
         {activeObligations.length} active payment{activeObligations.length === 1 ? "" : "s"}.
       </p>
 
-      {recipients.length === 0 ? (
-        <p style={{ fontSize: 14, color: theme.warn }}>Add a recipient first (from New Payment) before setting up a backup.</p>
-      ) : (
-        <>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted, marginBottom: 8 }}>Backup recipient</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {recipients.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setBackupRecipientId(r.id)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: 16,
-                    border: `1px solid ${r.id === backupRecipientId ? theme.accent : theme.border}`,
-                    background: r.id === backupRecipientId ? theme.accent : "transparent",
-                    color: r.id === backupRecipientId ? "#fff" : theme.ink,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted, marginBottom: 8 }}>Backup recipient</div>
 
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted, marginBottom: 8 }}>Redirect after inactivity of</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {INACTIVITY_OPTIONS.map((days) => (
-                <button
-                  key={days}
-                  onClick={() => setInactivityDays(days)}
-                  style={{
-                    padding: "7px 12px",
-                    borderRadius: 14,
-                    border: `1px solid ${days === inactivityDays ? theme.accent : theme.border}`,
-                    background: days === inactivityDays ? theme.accent : "transparent",
-                    color: days === inactivityDays ? "#fff" : theme.ink,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {days} days
-                </button>
-              ))}
-            </div>
+        {recipients.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button onClick={() => setMode("existing")} style={modeTabStyle(theme, mode === "existing")}>
+              Choose existing
+            </button>
+            <button onClick={() => setMode("new")} style={modeTabStyle(theme, mode === "new")}>
+              Enter a new wallet
+            </button>
           </div>
+        )}
 
-          {error && <p style={{ marginBottom: 14, fontSize: 13, color: theme.warn }}>{error}</p>}
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            style={{ width: "100%", padding: 14, background: theme.accent, color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 15, cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.6 : 1 }}
-          >
-            {submitting ? "Setting up…" : "Set up continuity"}
-          </button>
-        </>
-      )}
+        {mode === "existing" && recipients.length > 0 ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {recipients.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setBackupRecipientId(r.id)}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 16,
+                  border: `1px solid ${r.id === backupRecipientId ? theme.accent : theme.border}`,
+                  background: r.id === backupRecipientId ? theme.accent : "transparent",
+                  color: r.id === backupRecipientId ? "#fff" : theme.ink,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 12.5, color: theme.inkMuted }}>Name</span>
+              <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="e.g. Mom" style={inputStyle(theme)} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 12.5, color: theme.inkMuted }}>Wallet address</span>
+              <input
+                value={newPayoutAddress}
+                onChange={(e) => setNewPayoutAddress(e.target.value)}
+                placeholder="0x…"
+                style={{ ...inputStyle(theme), fontFamily: "'JetBrains Mono',monospace" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 12.5, color: theme.inkMuted }}>Country</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {COUNTRY_OPTIONS.map((c) => (
+                  <button key={c.name} onClick={() => setNewCountry(c.name)} style={modeTabStyle(theme, c.name === newCountry)}>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </label>
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted, marginBottom: 8 }}>Redirect after inactivity of</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {INACTIVITY_OPTIONS.map((days) => (
+            <button
+              key={days}
+              onClick={() => setInactivityDays(days)}
+              style={{
+                padding: "7px 12px",
+                borderRadius: 14,
+                border: `1px solid ${days === inactivityDays ? theme.accent : theme.border}`,
+                background: days === inactivityDays ? theme.accent : "transparent",
+                color: days === inactivityDays ? "#fff" : theme.ink,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {days} days
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <p style={{ marginBottom: 14, fontSize: 13, color: theme.warn }}>{error}</p>}
+      <button
+        onClick={handleSubmit}
+        disabled={submitting}
+        style={{ width: "100%", padding: 14, background: theme.accent, color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 15, cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.6 : 1 }}
+      >
+        {submitting ? "Setting up…" : "Set up continuity"}
+      </button>
     </div>
   );
+}
+
+function modeTabStyle(theme: ReturnType<typeof useAppTheme>["theme"], active: boolean): CSSProperties {
+  return {
+    padding: "6px 12px",
+    borderRadius: 14,
+    border: `1px solid ${active ? theme.accent : theme.border}`,
+    background: active ? theme.accent : "transparent",
+    color: active ? "#fff" : theme.ink,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+}
+
+function inputStyle(theme: ReturnType<typeof useAppTheme>["theme"]): CSSProperties {
+  return {
+    padding: "10px 12px",
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    background: "transparent",
+    color: theme.ink,
+    fontSize: 14,
+  };
 }
