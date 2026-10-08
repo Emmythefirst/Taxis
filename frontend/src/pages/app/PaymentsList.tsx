@@ -24,7 +24,12 @@ export function PaymentsList() {
         const pendingReview = obligationCycles.find((c) => c.state === "REQUIRES_APPROVAL");
         const relevant = pendingReview ?? [...obligationCycles].sort((a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime())[0];
 
-        const status = o.status !== "ACTIVE" ? "Paused" : pendingReview ? "Needs review" : "Active";
+        // CANCELLED and PAUSED used to collapse into the same "Paused"
+        // label — misleading for CANCELLED specifically, since it implies
+        // something resumable, and a cancelled obligation (new this
+        // session — Settings' per-obligation "Cancel payment") is a
+        // deliberate, permanent removal, not a pause.
+        const status = o.status === "CANCELLED" ? "Cancelled" : o.status !== "ACTIVE" ? "Paused" : pendingReview ? "Needs review" : "Active";
         const kind: "success" | "warn" | "neutral" = status === "Active" ? "success" : status === "Needs review" ? "warn" : "neutral";
         const nextDueAt = status === "Active" && relevant && NON_TERMINAL.has(relevant.state) ? relevant.dueAt : undefined;
 

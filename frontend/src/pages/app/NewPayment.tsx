@@ -4,6 +4,7 @@ import { useSigners } from "@privy-io/react-auth";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
 import { COUNTRY_OPTIONS } from "../../app/countries";
+import { reattachAgentSigner } from "../../app/reattachSigners";
 import * as endpoints from "../../api/endpoints";
 import type { Cadence, Hex } from "../../types";
 
@@ -64,7 +65,7 @@ function parseAmount(raw: string): number {
 export function NewPayment() {
   const { theme } = useAppTheme();
   const { userId, walletAddress, continuity, setAgentQuorumId, refresh } = useAppData();
-  const { addSigners } = useSigners();
+  const { addSigners, removeSigners } = useSigners();
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
@@ -116,8 +117,17 @@ export function NewPayment() {
       // The real owner-signed tap (Section A.4 step 4) — this IS the
       // permission grant, not a formality. Everything before this point is
       // just preparation; nothing is authorized on Privy's side until this
-      // succeeds.
-      await addSigners({ address: walletAddress, signers: [{ signerId: created.agentQuorumId, policyIds: [created.policyId] }] });
+      // succeeds. Goes through reattachAgentSigner() rather than a plain
+      // addSigners() call: a SECOND+ obligation means the agent quorum is
+      // already attached from the first one, and addSigners() rejects
+      // re-adding an already-attached signerId outright (confirmed live).
+      await reattachAgentSigner({
+        addSigners,
+        removeSigners,
+        walletAddress,
+        continuity,
+        agent: { agentQuorumId: created.agentQuorumId, policyId: created.policyId },
+      });
 
       await endpoints.recordGrant(created.obligation.id, { policyId: created.policyId, expiresAtUnix: created.expiresAtUnix, kind: "CYCLE" });
 

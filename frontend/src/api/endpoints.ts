@@ -73,6 +73,20 @@ export function renewObligation(obligationId: string): Promise<RenewObligationRe
   return api.post(`/obligations/${obligationId}/renew`);
 }
 
+export interface CancelObligationResult {
+  obligation: ObligationEnvelope;
+  policyId: string;
+  agentQuorumId: string;
+}
+
+export function cancelObligation(obligationId: string): Promise<CancelObligationResult> {
+  return api.post(`/obligations/${obligationId}/cancel`);
+}
+
+export function confirmCancelObligation(obligationId: string, policyId: string): Promise<{ obligationId: string; status: string }> {
+  return api.post(`/obligations/${obligationId}/cancel/confirm`, { policyId });
+}
+
 export function recordGrant(
   obligationId: string,
   params: { policyId: string; expiresAtUnix: number; kind?: "CYCLE" | "CONTINUITY" },
@@ -122,6 +136,11 @@ export interface ContinuityStatus {
   backupRecipientId?: string;
   inactivityThresholdDays?: number;
   expiresAt?: string;
+  /** Only present when configured — needed to preserve continuity's own
+   *  authority when re-attaching the agent signer elsewhere. See
+   *  app/reattachSigners.ts for why. */
+  policyId?: string;
+  continuityQuorumId?: string;
 }
 
 export function getContinuityStatus(userId: string): Promise<ContinuityStatus> {

@@ -417,10 +417,25 @@ describe("continuity endpoints", () => {
       expect(grantRes.status).toBe(200);
 
       const statusRes = await fetch(`${continuityBaseUrl}/users/user_cont/continuity`);
-      const statusBody = (await statusRes.json()) as { configured: boolean; backupRecipientId?: string; inactivityThresholdDays?: number };
+      const statusBody = (await statusRes.json()) as {
+        configured: boolean;
+        backupRecipientId?: string;
+        inactivityThresholdDays?: number;
+        policyId?: string;
+        continuityQuorumId?: string;
+      };
       expect(statusBody.configured).toBe(true);
       expect(statusBody.backupRecipientId).toBe("rcp_backup");
       expect(statusBody.inactivityThresholdDays).toBe(60);
+      // Real bug, found live: addSigners() is additive-only (rejects
+      // re-adding an already-attached signerId as "duplicate"), and
+      // removeSigners() strips every signer at once — so re-attaching the
+      // AGENT signer elsewhere (New Payment, Renew, Cancel) must rebuild
+      // the FULL signer set in one call, or continuity's own authority
+      // gets silently dropped. These two fields are what the frontend
+      // needs to preserve it.
+      expect(statusBody.policyId).toBe(setupBody.policyId);
+      expect(statusBody.continuityQuorumId).toBe("continuity_quorum_test");
     });
 
     it("400s when the chosen backup recipient doesn't belong to the user", async () => {
@@ -576,5 +591,82 @@ describe("a route handler throwing fails only that request, not the whole server
       body: JSON.stringify({ userId: "" }), // deliberately invalid, but a normal 400, not a crash
     });
     expect(healthy.status).toBe(400);
+  });
+});
+
+describe("per-obligation cancel — excludes only this obligation, confirms before touching others", () => {
+  let liveServer: Server;
+  let liveBaseUrl: string;
+  let liveDb: Database.Database;
+  let policyIds: string[];
+
+  beforeAll(async () => {
+    liveDb = openDb(":memory:");
+    insertUser(liveDb, "user_cancel");
+    policyIds = [];
+
+    const fakePrivy = {
+      policies: () => ({
+        create: async () => {
+          const id = `policy_${policyIds.length + 1}`;
+          policyIds.push(id);
+          return { id };
+        },
+      }),
+    } as any;
+
+    liveServer = createTaxisServer({
+      db: liveDb,
+      privy: fakePrivy,
+      ausdAddress: "0x000000000000000000000000000000000000ff",
+      ausdDecimals: 6,
+      agentQuorumId: "agent_quorum_live",
+      grantGraceSeconds: 3 * 24 * 60 * 60,
+    });
+    await new Promise<void>((resolve) => liveServer.listen(0, resolve));
+    const address = liveServer.address();
+    if (address === null || typeof address === "string") throw new Error("expected a bound port");
+    liveBaseUrl = `http://localhost:${address.port}`;
+
+    const recipientA: Recipient = { id: "rcp_cancel_a", userId: "user_cancel", label: "A", payoutAddress: "0x0000000000000000000000000000000000001a", localCurrency: "NGN", status: "ACTIVE", addedAt: "2026-01-01T00:00:00.000Z" };
+    const recipientB: Recipient = { id: "rcp_cancel_b", userId: "user_cancel", label: "B", payoutAddress: "0x0000000000000000000000000000000000002b", localCurrency: "NGN", status: "ACTIVE", addedAt: "2026-01-01T00:00:00.000Z" };
+    insertRecipient(liveDb, recipientA);
+    insertRecipient(liveDb, recipientB);
+    const obligationA: ObligationEnvelope = { id: "obl_cancel_a", userId: "user_cancel", recipientId: "rcp_cancel_a", targetLocalAmount: 300_000, localCurrency: "NGN", maxAusdCost: 210, maxFeeAusd: 3, cumulativeCapAusd: 1000, cadence: { kind: "MONTHLY", dayOfMonth: 1 }, quoteExpirySeconds: 300, status: "ACTIVE", createdAt: "2026-01-01T00:00:00.000Z" };
+    const obligationB: ObligationEnvelope = { id: "obl_cancel_b", userId: "user_cancel", recipientId: "rcp_cancel_b", targetLocalAmount: 300_000, localCurrency: "NGN", maxAusdCost: 210, maxFeeAusd: 3, cumulativeCapAusd: 1000, cadence: { kind: "MONTHLY", dayOfMonth: 1 }, quoteExpirySeconds: 300, status: "ACTIVE", createdAt: "2026-01-01T00:00:00.000Z" };
+    insertObligation(liveDb, obligationA);
+    insertObligation(liveDb, obligationB);
+    recordGrant(liveDb, { obligationId: "obl_cancel_a", kind: "CYCLE", policyId: "policy_original_combined", agentQuorumId: "agent_quorum_live", expiresAt: "2030-01-01T00:00:00.000Z" });
+    recordGrant(liveDb, { obligationId: "obl_cancel_b", kind: "CYCLE", policyId: "policy_original_combined", agentQuorumId: "agent_quorum_live", expiresAt: "2030-01-01T00:00:00.000Z" });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => liveServer.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it("builds a policy excluding the cancelled obligation, but changes nothing until confirmed", async () => {
+    const cancelRes = await fetch(`${liveBaseUrl}/obligations/obl_cancel_a/cancel`, { method: "POST" });
+    expect(cancelRes.status).toBe(200);
+    const { policyId } = (await cancelRes.json()) as { policyId: string };
+    expect(policyId).not.toBe("policy_original_combined");
+
+    // Never confirmed yet — both obligations' bookkeeping must be untouched.
+    expect(getObligation(liveDb, "obl_cancel_a")?.status).toBe("ACTIVE");
+    expect(getActiveGrant(liveDb, "obl_cancel_a", "CYCLE")?.policyId).toBe("policy_original_combined");
+    expect(getActiveGrant(liveDb, "obl_cancel_b", "CYCLE")?.policyId).toBe("policy_original_combined");
+
+    const confirmRes = await fetch(`${liveBaseUrl}/obligations/obl_cancel_a/cancel/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ policyId }),
+    });
+    expect(confirmRes.status).toBe(200);
+
+    // A is cancelled and its own grant is revoked, not left dangling ACTIVE.
+    expect(getObligation(liveDb, "obl_cancel_a")?.status).toBe("CANCELLED");
+    expect(getActiveGrant(liveDb, "obl_cancel_a", "CYCLE")).toBeUndefined();
+
+    // B was never cancelled — it keeps its authority, just retargeted onto
+    // the new (smaller) combined policy now that the real attach is proven.
+    expect(getActiveGrant(liveDb, "obl_cancel_b", "CYCLE")?.policyId).toBe(policyId);
   });
 });

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useLogout, useSigners } from "@privy-io/react-auth";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
+import { reattachAgentSigner } from "../../app/reattachSigners";
 import * as endpoints from "../../api/endpoints";
 
 const RENEWAL_WARNING_WINDOW_MS = 48 * 60 * 60 * 1000; // Section A.4 step 6: "shortly before" the window lapses
@@ -39,6 +40,8 @@ export function Settings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [renewingId, setRenewingId] = useState<string | undefined>(undefined);
+  const [cancellingId, setCancellingId] = useState<string | undefined>(undefined);
+  const [cancelConfirmId, setCancelConfirmId] = useState<string | undefined>(undefined);
 
   const activeObligations = obligations.filter((o) => o.status === "ACTIVE");
   const recipientById = new Map(recipients.map((r) => [r.id, r]));
@@ -79,13 +82,42 @@ export function Settings() {
     setError(undefined);
     try {
       const renewed = await endpoints.renewObligation(obligationId);
-      await addSigners({ address: walletAddress, signers: [{ signerId: renewed.agentQuorumId, policyIds: [renewed.policyId] }] });
+      await reattachAgentSigner({
+        addSigners,
+        removeSigners,
+        walletAddress,
+        continuity,
+        agent: { agentQuorumId: renewed.agentQuorumId, policyId: renewed.policyId },
+      });
       await endpoints.recordGrant(obligationId, { policyId: renewed.policyId, expiresAtUnix: renewed.expiresAtUnix, kind: "CYCLE" });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRenewingId(undefined);
+    }
+  }
+
+  // Cancelling a single obligation, as opposed to the kill switch's
+  // everything-at-once revocation. Two real owner-signed steps, same
+  // "never assume, only confirm what actually happened" discipline as
+  // renew/create: build the smaller policy, re-attach it for real, THEN
+  // tell the backend it's confirmed — never skip straight to the confirm
+  // call just because the build step succeeded.
+  async function handleCancel(obligationId: string) {
+    if (!walletAddress) return;
+    setCancellingId(obligationId);
+    setError(undefined);
+    try {
+      const { policyId, agentQuorumId } = await endpoints.cancelObligation(obligationId);
+      await reattachAgentSigner({ addSigners, removeSigners, walletAddress, continuity, agent: { agentQuorumId, policyId } });
+      await endpoints.confirmCancelObligation(obligationId, policyId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCancellingId(undefined);
+      setCancelConfirmId(undefined);
     }
   }
 
@@ -136,15 +168,42 @@ export function Settings() {
                     up to ${o.maxAusdCost} / cycle · {expiresAt ? (expiresAt.getTime() < Date.now() ? "expired" : `until ${expiresAt.toLocaleDateString()}`) : "no active grant"}
                   </div>
                 </div>
-                {needsRenewal && (
-                  <button
-                    onClick={() => handleRenew(o.id)}
-                    disabled={renewingId === o.id}
-                    style={{ padding: "8px 12px", background: theme.ink, color: theme.bg, border: "none", borderRadius: 4, fontSize: 12.5, fontWeight: 600, cursor: renewingId === o.id ? "default" : "pointer" }}
-                  >
-                    {renewingId === o.id ? "Renewing…" : "Renew"}
-                  </button>
-                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  {needsRenewal && (
+                    <button
+                      onClick={() => handleRenew(o.id)}
+                      disabled={renewingId === o.id}
+                      style={{ padding: "8px 12px", background: theme.ink, color: theme.bg, border: "none", borderRadius: 4, fontSize: 12.5, fontWeight: 600, cursor: renewingId === o.id ? "default" : "pointer" }}
+                    >
+                      {renewingId === o.id ? "Renewing…" : "Renew"}
+                    </button>
+                  )}
+                  {cancelConfirmId === o.id ? (
+                    <>
+                      <button
+                        onClick={() => handleCancel(o.id)}
+                        disabled={cancellingId === o.id}
+                        style={{ padding: "8px 12px", background: theme.warn, color: "#fff", border: "none", borderRadius: 4, fontSize: 12.5, fontWeight: 600, cursor: cancellingId === o.id ? "default" : "pointer" }}
+                      >
+                        {cancellingId === o.id ? "Cancelling…" : "Confirm cancel"}
+                      </button>
+                      <button
+                        onClick={() => setCancelConfirmId(undefined)}
+                        disabled={cancellingId === o.id}
+                        style={{ padding: "8px 12px", background: "none", border: `1px solid ${theme.border}`, borderRadius: 4, fontSize: 12.5, fontWeight: 600, cursor: "pointer", color: theme.ink }}
+                      >
+                        Never mind
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setCancelConfirmId(o.id)}
+                      style={{ padding: "8px 12px", background: "none", border: `1px solid ${theme.border}`, borderRadius: 4, fontSize: 12.5, fontWeight: 600, cursor: "pointer", color: theme.inkMuted }}
+                    >
+                      Cancel payment
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })

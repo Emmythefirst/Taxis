@@ -31,7 +31,7 @@ import { registerObligationsRoutes, type ObligationsRouteDeps } from "./http/rou
 import { registerCheckoutRoutes, type CheckoutRouteDeps } from "./http/routes/checkout.js";
 import { registerContinuityRoutes, type ContinuityRouteDeps } from "./http/routes/continuity.js";
 import { registerCreRoutes } from "./http/routes/cre.js";
-import { staticMarketDataProvider, liveMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
+import { runDueCycles, staticMarketDataProvider, liveMarketDataProvider, type RunDueCyclesDeps } from "./scheduler/runDueCycles.js";
 import { ERC20_ABI } from "./privy/erc20.js";
 import { createPrivyTransferExecutor, checkTransactionReceipt } from "./privy/execute.js";
 import { formatBaseUnitsToDecimal } from "./domain/units.js";
@@ -271,6 +271,53 @@ async function tryBuildLiveExecutionDeps(): Promise<{
   }
 }
 
+/**
+ * Local stand-in for the missing always-on external CRE scheduler. A real,
+ * live-deployed CRE workflow would call POST /cre/trigger-check
+ * continuously and automatically on its own — but that needs Chainlink's
+ * DON deploy access, which is still pending (see progress.md). Without it,
+ * nothing was polling the trigger endpoint at all, so cycles only ever
+ * generated when someone manually curled it or ran `cre workflow
+ * simulate`. This doesn't replace CRE's real role in the architecture —
+ * the actual integration (the workflow, the trigger endpoint, the whole
+ * decision loop) is unchanged and still doing the real work; this interval
+ * is just what calls it locally when nothing external will, so testing
+ * (and the live demo, if deploy access still isn't through by then)
+ * doesn't need a human in the loop to see the app behave as designed.
+ *
+ * Disable with LOCAL_SCHEDULER_ENABLED=false — e.g. once a real live DON
+ * deployment exists, so the two don't double up (harmless either way,
+ * since every trigger is idempotent by design, but needless).
+ */
+function startLocalScheduler(execute: RunDueCyclesDeps): void {
+  if (process.env.LOCAL_SCHEDULER_ENABLED === "false") {
+    console.log("Local scheduler disabled (LOCAL_SCHEDULER_ENABLED=false) — relying on an external trigger only.");
+    return;
+  }
+  const intervalMs = Number(process.env.LOCAL_SCHEDULER_INTERVAL_MS ?? "30000");
+  let running = false;
+
+  const tick = async () => {
+    if (running) return; // never overlap a slow run with the next tick
+    running = true;
+    try {
+      const results = await runDueCycles(execute);
+      if (results.length > 0) {
+        console.log(`[local-scheduler] processed ${results.length} due cycle(s): ${results.map((r) => `${r.cycleId}=${r.outcome}`).join(", ")}`);
+      }
+    } catch (err) {
+      console.error("[local-scheduler] tick failed:", err instanceof Error ? err.message : err);
+    } finally {
+      running = false;
+    }
+  };
+
+  console.log(`Local scheduler enabled — calling runDueCycles() every ${intervalMs}ms (stand-in for the missing external CRE trigger).`);
+  void tick(); // run once immediately rather than waiting a full interval on startup
+  const interval = setInterval(() => void tick(), intervalMs);
+  interval.unref(); // never the reason the process won't exit
+}
+
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const port = Number(process.env.PORT ?? "8787");
@@ -289,4 +336,7 @@ if (isMain) {
     console.log(`CRE trigger endpoint: POST http://localhost:${port}/cre/trigger-check`);
     console.log(live ? "Mode: LIVE execution (real Privy transfers on due cycles + checkout)." : "Mode: list-only (no live execution deps).");
   });
+  if (live?.execute) {
+    startLocalScheduler(live.execute);
+  }
 }

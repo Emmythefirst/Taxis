@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSigners } from "@privy-io/react-auth";
 import { useAppTheme } from "../../app/ThemeContext";
 import { useAppData } from "../../app/AppDataContext";
+import { reattachContinuitySigner } from "../../app/reattachSigners";
 import * as endpoints from "../../api/endpoints";
 
 const INACTIVITY_OPTIONS = [30, 60, 90] as const;
@@ -17,8 +18,8 @@ const INACTIVITY_OPTIONS = [30, 60, 90] as const;
  */
 export function ContinuitySetup() {
   const { theme } = useAppTheme();
-  const { userId, walletAddress, recipients, obligations, refresh } = useAppData();
-  const { addSigners } = useSigners();
+  const { userId, walletAddress, recipients, obligations, grants, refresh } = useAppData();
+  const { addSigners, removeSigners } = useSigners();
   const navigate = useNavigate();
 
   const [backupRecipientId, setBackupRecipientId] = useState<string | undefined>(recipients[0]?.id);
@@ -39,8 +40,20 @@ export function ContinuitySetup() {
       const setup = await endpoints.setupContinuity(userId, { backupRecipientId, inactivityThresholdDays: inactivityDays });
 
       // The real, distinct owner-signed tap — against the CONTINUITY
-      // quorum specifically, never the day-to-day agent one.
-      await addSigners({ address: walletAddress, signers: [{ signerId: setup.continuityQuorumId, policyIds: [setup.policyId] }] });
+      // quorum specifically, never the day-to-day agent one. Goes through
+      // reattachContinuitySigner() rather than a plain addSigners() call:
+      // addSigners() rejects re-adding an already-attached signerId
+      // outright (confirmed live) — relevant both for re-running this
+      // setup a second time (changing the backup recipient) AND for
+      // preserving the agent signer's own authority, which would
+      // otherwise be silently dropped if it's already attached.
+      await reattachContinuitySigner({
+        addSigners,
+        removeSigners,
+        walletAddress,
+        grants,
+        continuity: { continuityQuorumId: setup.continuityQuorumId, policyId: setup.policyId },
+      });
 
       await endpoints.recordContinuityGrant(userId, { policyId: setup.policyId, expiresAtUnix: setup.expiresAtUnix, inactivityThresholdDays: inactivityDays });
       await refresh();

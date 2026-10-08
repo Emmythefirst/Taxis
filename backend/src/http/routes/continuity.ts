@@ -55,6 +55,16 @@ export function registerContinuityRoutes(router: Router, deps: ContinuityRouteDe
       backupRecipientId,
       inactivityThresholdDays: user.continuityInactivityDays,
       expiresAt: activeGrant.expiresAt,
+      // Needed so the frontend can preserve continuity's current authority
+      // when re-attaching the AGENT signer elsewhere (New Payment, Renew,
+      // Cancel) — addSigners() is additive-only (confirmed live: it
+      // rejects re-adding an already-present signerId as a duplicate), and
+      // removeSigners() strips every signer at once, so any update to one
+      // signer's policy requires rebuilding the FULL set and re-adding it
+      // in one call — never just the signer that changed, or the other
+      // one is silently dropped.
+      policyId: activeGrant.policyId,
+      continuityQuorumId: deps.continuityQuorumId,
     });
   });
 

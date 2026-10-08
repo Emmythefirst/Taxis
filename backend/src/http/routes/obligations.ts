@@ -303,6 +303,73 @@ export function registerObligationsRoutes(router: Router, deps: ObligationsRoute
     sendJson(ctx.res, 200, { obligation, policyId, expiresAtUnix, agentQuorumId: deps.agentQuorumId });
   });
 
+  // Cancelling a single obligation, as opposed to the global kill switch
+  // (which revokes the wallet's agent signer entirely, pausing every
+  // obligation at once). There was no way to do this before — confirmed by
+  // checking every route and every frontend screen. Reuses
+  // rebuildOperationsPolicy's existing excludingObligationId parameter
+  // (originally built for renewal) to build a combined policy that simply
+  // omits this obligation's rule — everything else stays authorized
+  // exactly as before. Same two-phase discipline as creation/renewal:
+  // this only ever builds and returns the policy; nothing is assumed
+  // cancelled until /cancel/confirm proves the real owner-signed re-attach
+  // actually happened.
+  router.post("/obligations/:id/cancel", async (ctx) => {
+    if (!deps.privy || !deps.agentQuorumId) {
+      sendJson(ctx.res, 503, { error: "cancellation not configured on this server (no Privy client)" });
+      return;
+    }
+    const obligationId = ctx.params.id!;
+    const obligation = getObligation(deps.db, obligationId);
+    if (!obligation) {
+      sendJson(ctx.res, 404, { error: "obligation not found" });
+      return;
+    }
+
+    const { policyId } = await rebuildOperationsPolicy(
+      { db: deps.db, privy: deps.privy, ausdAddress: deps.ausdAddress, ausdDecimals: deps.ausdDecimals },
+      obligation.userId,
+      undefined, // no extra rule — this obligation is being removed, not replaced
+      obligationId,
+    );
+
+    sendJson(ctx.res, 200, { obligation, policyId, agentQuorumId: deps.agentQuorumId });
+  });
+
+  // Called once the frontend's live, owner-signed addSigners() re-attach
+  // for /cancel's policyId succeeds — never assumed. Marks the obligation
+  // CANCELLED (not PAUSED — that status means something different, the
+  // kill switch's "stopped everything, could resume" semantics; this is a
+  // deliberate, permanent removal of one specific obligation), revokes its
+  // own CYCLE grant bookkeeping, and retargets every other still-active
+  // obligation's recorded policy_id to the new, smaller policy — same
+  // confirmed-only-after-proof discipline as every other retarget point
+  // (see operationsPolicy.ts's header for why this can never happen at
+  // policy-creation time).
+  router.post("/obligations/:id/cancel/confirm", async (ctx) => {
+    const obligationId = ctx.params.id!;
+    const obligation = getObligation(deps.db, obligationId);
+    if (!obligation) {
+      sendJson(ctx.res, 404, { error: "obligation not found" });
+      return;
+    }
+    const body = await readJsonBody(ctx.req);
+    const { policyId } = body as { policyId?: string };
+    if (!policyId) {
+      sendJson(ctx.res, 400, { error: "expected { policyId }" });
+      return;
+    }
+
+    const activeGrant = getActiveGrant(deps.db, obligationId, "CYCLE");
+    if (activeGrant) {
+      revokeGrant(deps.db, activeGrant.id);
+    }
+    updateObligationStatus(deps.db, obligationId, "CANCELLED");
+    retargetActiveGrantsPolicyId(deps.db, obligation.userId, "CYCLE", policyId);
+
+    sendJson(ctx.res, 200, { obligationId, status: "CANCELLED" });
+  });
+
   // See server.ts's original header: the frontend must have ALREADY
   // performed the real, owner-signed revocation on Privy's side before
   // calling this; it only syncs Taxis's own records.

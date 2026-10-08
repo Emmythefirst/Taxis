@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { usePrivy } from "@privy-io/react-auth";
 import { useAppTheme } from "./ThemeContext";
@@ -13,8 +13,21 @@ const NAV_ITEMS = [
 ];
 
 function Sidebar() {
-  const { theme, dark, toggleTheme } = useAppTheme();
-  const { balance } = useAppData();
+  const { theme } = useAppTheme();
+  const { balance, walletAddress } = useAppData();
+  const [copied, setCopied] = useState(false);
+
+  async function copyAddress() {
+    if (!walletAddress) return;
+    try {
+      await navigator.clipboard.writeText(walletAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can fail (permissions, insecure context) — the
+      // address is still shown and selectable, so this is non-fatal.
+    }
+  }
 
   return (
     <aside
@@ -63,35 +76,56 @@ function Sidebar() {
           </div>
         </div>
         <div style={{ fontSize: 10.5, color: theme.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>⛓ Scheduled by Chainlink CRE</div>
-        <button
-          onClick={toggleTheme}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            padding: "9px 12px",
-            border: `1px solid ${theme.border}`,
-            borderRadius: 4,
-            background: "none",
-            color: theme.ink,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          {dark ? "☾" : "☀"} <span>Theme</span>
-        </button>
+        {walletAddress && (
+          <div style={{ padding: 10, border: `1px solid ${theme.border}`, borderRadius: 4 }}>
+            <div style={{ fontSize: 10.5, color: theme.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 5 }}>Your wallet</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5 }}>
+                {walletAddress.slice(0, 6)}…{walletAddress.slice(-4)}
+              </span>
+              <button
+                onClick={copyAddress}
+                style={{ background: "none", border: "none", color: theme.inkMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: 0, flexShrink: 0 }}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );
 }
 
 function AppShellInner() {
-  const { theme } = useAppTheme();
+  const { theme, dark, toggleTheme } = useAppTheme();
   const { loading, error } = useAppData();
 
   return (
     <div style={{ background: theme.bg, minHeight: "100vh", color: theme.ink, fontSize: 15 }}>
+      <button
+        onClick={() => toggleTheme()}
+        aria-label="Toggle theme"
+        style={{
+          position: "fixed",
+          top: 24,
+          right: 24,
+          width: 38,
+          height: 38,
+          borderRadius: "50%",
+          border: `1px solid ${theme.border}`,
+          background: theme.surface,
+          color: theme.ink,
+          fontSize: 16,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 10,
+        }}
+      >
+        {dark ? "☾" : "☀"}
+      </button>
       <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", minHeight: "100vh" }}>
         <Sidebar />
         <main style={{ padding: "36px 44px", maxWidth: 980 }}>
