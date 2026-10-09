@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSigners } from "@privy-io/react-auth";
 import { useAppTheme } from "../../app/ThemeContext";
@@ -73,22 +73,50 @@ export function NewPayment() {
   const [country, setCountry] = useState(COUNTRY_OPTIONS[0]!.name);
   const [amount, setAmount] = useState("2,400");
   const [cadence, setCadence] = useState<(typeof CADENCE_OPTIONS)[number]>("Monthly");
-  const [ceiling, setCeiling] = useState("85");
   const [tolerance, setTolerance] = useState<(typeof TOLERANCE_OPTIONS)[number]>("5%");
+  const [fxRate, setFxRate] = useState<number | undefined>(undefined);
+  const [fxRateError, setFxRateError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [done, setDone] = useState(false);
 
   const selectedCountry = COUNTRY_OPTIONS.find((c) => c.name === country) ?? COUNTRY_OPTIONS[0]!;
 
+  // Rate tolerance and the spending ceiling used to be two independent,
+  // disconnected inputs — the user picked a tolerance chip that was never
+  // actually used anywhere, then separately had to guess a raw dollar
+  // ceiling. They're really the same underlying protection (how much FX
+  // drift before a cycle needs manual approval — decisionLoop.ts's
+  // `withinFxCeiling` check), so the ceiling is now DERIVED from tolerance
+  // against today's live rate rather than asked for directly.
+  useEffect(() => {
+    let cancelled = false;
+    setFxRateError(undefined);
+    endpoints
+      .getFxRate(selectedCountry.currency)
+      .then((r) => !cancelled && setFxRate(r.fxRate))
+      .catch((err) => !cancelled && setFxRateError(err instanceof Error ? err.message : String(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountry.currency]);
+
+  const tolerancePercent = Number(tolerance.replace("%", "")) / 100;
+  const derivedCeiling = useMemo(() => {
+    if (fxRate === undefined) return undefined;
+    const targetLocalAmount = parseAmount(amount);
+    if (!targetLocalAmount || targetLocalAmount <= 0) return undefined;
+    return (targetLocalAmount / fxRate) * (1 + tolerancePercent);
+  }, [fxRate, amount, tolerancePercent]);
+
   async function handleSubmit() {
     setError(undefined);
     if (!name.trim()) return setError("Enter a recipient name.");
     if (!/^0x[0-9a-fA-F]{40}$/.test(payoutAddress.trim())) return setError("Enter a valid payout address (0x… 40 hex characters).");
     const targetLocalAmount = parseAmount(amount);
-    const maxAusdCost = parseAmount(ceiling);
     if (!targetLocalAmount || targetLocalAmount <= 0) return setError("Enter a valid amount.");
-    if (!maxAusdCost || maxAusdCost <= 0) return setError("Enter a valid spending ceiling.");
+    if (derivedCeiling === undefined) return setError(fxRateError ?? "Still fetching today's rate — try again in a moment.");
+    const maxAusdCost = derivedCeiling;
     if (!walletAddress) return setError("Your wallet isn't linked yet — try logging out and back in.");
 
     const cadenceValue: Cadence =
@@ -240,11 +268,6 @@ export function NewPayment() {
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted }}>Your spending ceiling per cycle</span>
-            <input value={ceiling} onChange={(e) => setCeiling(e.target.value)} style={{ ...inputStyle(theme), fontFamily: "'JetBrains Mono',monospace" }} />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: theme.inkMuted }}>Rate tolerance</span>
             <div style={{ display: "flex", gap: 8 }}>
               {TOLERANCE_OPTIONS.map((t) => (
@@ -253,6 +276,9 @@ export function NewPayment() {
                 </button>
               ))}
             </div>
+            <p style={{ fontSize: 12, color: theme.inkMuted, lineHeight: 1.4, marginTop: 2 }}>
+              If the exchange rate moves more than this against you before a cycle runs, Taxis pauses it for your approval instead of paying automatically.
+            </p>
           </label>
         </div>
 
@@ -261,8 +287,8 @@ export function NewPayment() {
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Row theme={theme} label="Recipient" value={`${name || "—"} · ${country}`} />
             <Row theme={theme} label="They get" value={`${amount} ${selectedCountry.currency} / ${cadence}`} mono />
-            <Row theme={theme} label="Your ceiling" value={`$${ceiling}`} mono />
             <Row theme={theme} label="Rate tolerance" value={tolerance} />
+            <Row theme={theme} label="Your ceiling" value={derivedCeiling !== undefined ? `$${derivedCeiling.toFixed(2)}` : "—"} mono />
           </div>
           {continuity?.configured && (
             <p style={{ marginTop: 14, fontSize: 12.5, color: theme.inkMuted, lineHeight: 1.5 }}>

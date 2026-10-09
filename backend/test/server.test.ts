@@ -309,6 +309,14 @@ describe("checkout endpoints", () => {
       const res = await fetch(`${checkoutBaseUrl}/checkout/does-not-exist/execute`, { method: "POST" });
       expect(res.status).toBe(404);
     });
+
+    it("exposes the live FX rate for New Payment's tolerance-derived ceiling", async () => {
+      const res = await fetch(`${checkoutBaseUrl}/fx-rate/NGN`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { currency: string; fxRate: number };
+      expect(body.currency).toBe("NGN");
+      expect(body.fxRate).toBe(1500); // this test's fake market provider's fixed rate
+    });
   });
 });
 

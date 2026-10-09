@@ -118,6 +118,7 @@ export function createTaxisServer(options: CreateServerOptions = {}) {
   } else {
     router.post("/checkout/quote", (ctx) => sendJson(ctx.res, 503, { error: "checkout not configured on this server" }));
     router.post("/checkout/:id/execute", (ctx) => sendJson(ctx.res, 503, { error: "checkout not configured on this server" }));
+    router.get("/fx-rate/:currency", (ctx) => sendJson(ctx.res, 503, { error: "checkout not configured on this server" }));
   }
 
   if (options.paymentRequests) {

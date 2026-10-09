@@ -44,6 +44,18 @@ export interface CheckoutRouteDeps {
 }
 
 export function registerCheckoutRoutes(router: Router, db: Database.Database, deps: CheckoutRouteDeps): void {
+  // Lives here rather than a standalone route module because the market
+  // data dependency is already wired into this deps object for checkout —
+  // adding a whole new CreateServerOptions field + 503 fallback just to
+  // expose a read-only rate lookup wasn't worth it. Used by New Payment's
+  // form to derive a spending ceiling from the user's chosen rate tolerance
+  // against TODAY's rate, rather than asking them to guess a dollar figure.
+  router.get("/fx-rate/:currency", (ctx) => {
+    const currency = ctx.params.currency!;
+    sendJson(ctx.res, 200, { currency, fxRate: deps.market.getFxRate(currency) });
+  });
+
+
   router.post("/checkout/quote", async (ctx) => {
     const body = await readJsonBody(ctx.req);
     const { userId, merchantAddress, localAmount, localCurrency } = body as {

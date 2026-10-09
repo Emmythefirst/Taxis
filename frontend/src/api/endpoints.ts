@@ -122,6 +122,10 @@ export function createCheckoutQuote(params: { userId: string; merchantAddress: H
   return api.post("/checkout/quote", params);
 }
 
+export function getFxRate(currency: string): Promise<{ currency: string; fxRate: number }> {
+  return api.get(`/fx-rate/${currency}`);
+}
+
 export type ExecuteCheckoutResult =
   | { outcome: "SETTLED"; txHash: string }
   | { outcome: "FAILED"; reason: string }
