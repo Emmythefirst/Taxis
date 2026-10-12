@@ -83,8 +83,12 @@ export function ContinuitySetup() {
       });
 
       await endpoints.recordContinuityGrant(userId, { policyId: setup.policyId, expiresAtUnix: setup.expiresAtUnix, inactivityThresholdDays: inactivityDays });
-      await refresh();
+      // Confirmed server-side at this point — refresh() past here is only
+      // a data reload for display and must never turn an already-successful
+      // setup into an apparent failure if one of its many unrelated calls
+      // hiccups. Fire-and-forget, outside the catch below.
       setDone(true);
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

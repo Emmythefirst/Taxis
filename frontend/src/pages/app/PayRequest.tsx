@@ -108,9 +108,14 @@ export function PayRequest() {
       });
       const result = await endpoints.executeCheckout(checkoutId);
       if (result.outcome === "SETTLED" || result.outcome === "PENDING_CONFIRMATION") {
+        // The transfer already broadcast (or settled) at this point — the
+        // worst possible bug here would be showing an error screen for a
+        // payment that actually went through, which a refresh() hiccup
+        // landing in the catch below would do. Confirm success first,
+        // reload everything else as a fire-and-forget side effect.
         setDoneTxHash(result.txHash);
-        await refresh();
         setStage("done");
+        void refresh();
       } else {
         setError(result.reason);
         setStage("error");

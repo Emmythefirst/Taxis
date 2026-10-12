@@ -159,8 +159,14 @@ export function NewPayment() {
 
       await endpoints.recordGrant(created.obligation.id, { policyId: created.policyId, expiresAtUnix: created.expiresAtUnix, kind: "CYCLE" });
 
-      await refresh();
+      // The obligation and its grant are fully confirmed server-side at
+      // this point — refresh() past here is just reloading data for
+      // display, and must never be able to turn an already-successful
+      // setup into an apparent failure if one of its many unrelated calls
+      // hiccups (Promise.all inside refresh() rejects the whole call on
+      // any single endpoint failing). Fire-and-forget, outside the catch.
       setDone(true);
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

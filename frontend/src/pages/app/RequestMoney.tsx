@@ -77,15 +77,28 @@ export function RequestMoney() {
         memo: memo.trim() || undefined,
       });
       const url = paymentRequestPayUrl(request.id);
+      const qr = await toDataURL(url, { margin: 1, width: 240 });
       setPayUrl(url);
-      setQrDataUrl(await toDataURL(url, { margin: 1, width: 240 }));
-      await refresh();
-      await loadRequests();
+      setQrDataUrl(qr);
       setStage("ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStage("form");
+      return;
     }
+    // Best-effort side refreshes, deliberately OUTSIDE the try/catch above —
+    // the request was already created and its QR is already on screen at
+    // this point, so a transient hiccup in either of these (refresh()
+    // touches several unrelated endpoints in parallel) must never undo
+    // that. Real bug this fixes: Promise.all inside refresh() rejects the
+    // whole call if ANY single endpoint it touches hiccups, and that
+    // rejection was previously caught by the SAME try/catch as request
+    // creation — silently discarding an already-successful QR screen and
+    // dropping the user back to an empty form, even though the request had
+    // genuinely been created (confirmed: it still showed up under "Your
+    // requests" once the page was reloaded).
+    void refresh();
+    void loadRequests();
   }
 
   async function handleCancelRequest(requestId: string) {

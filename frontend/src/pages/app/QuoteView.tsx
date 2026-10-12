@@ -31,7 +31,12 @@ export function QuoteView() {
     setError(undefined);
     try {
       await endpoints.approveCycle(obligationId, cycleId);
-      await refresh();
+      // Confirmed server-side at this point — refresh() past here is only
+      // a data reload for display and must never turn an already-successful
+      // approval into an apparent failure if one of its many unrelated
+      // calls hiccups. Fire-and-forget; AppDataContext picks up the fresh
+      // state whenever it resolves.
+      void refresh();
       navigate("/app/payments");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -46,7 +51,7 @@ export function QuoteView() {
     setError(undefined);
     try {
       await endpoints.skipCycle(obligationId, cycleId);
-      await refresh();
+      void refresh();
       navigate("/app/payments");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

@@ -66,9 +66,13 @@ export function Settings() {
     try {
       await removeSigners({ address: walletAddress });
       await Promise.all(activeObligations.map((o) => endpoints.killSwitch(o.id, userId)));
-      await refresh();
+      // Every obligation is confirmed revoked server-side at this point —
+      // refresh() past here is only a data reload for display and must
+      // never turn an already-successful kill switch into an apparent
+      // failure if one of its many unrelated calls hiccups.
       setKilled(true);
       setKillConfirm(false);
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -90,7 +94,10 @@ export function Settings() {
         agent: { agentQuorumId: renewed.agentQuorumId, policyId: renewed.policyId },
       });
       await endpoints.recordGrant(obligationId, { policyId: renewed.policyId, expiresAtUnix: renewed.expiresAtUnix, kind: "CYCLE" });
-      await refresh();
+      // Confirmed server-side at this point — a refresh() hiccup past here
+      // must never surface as an error for a renewal that already
+      // succeeded.
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -112,7 +119,9 @@ export function Settings() {
       const { policyId, agentQuorumId } = await endpoints.cancelObligation(obligationId);
       await reattachAgentSigner({ addSigners, removeSigners, walletAddress, continuity, agent: { agentQuorumId, policyId } });
       await endpoints.confirmCancelObligation(obligationId, policyId);
-      await refresh();
+      // Confirmed server-side at this point — a refresh() hiccup past here
+      // must never surface as an error for a cancel that already succeeded.
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
