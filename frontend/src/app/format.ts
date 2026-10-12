@@ -11,7 +11,7 @@ export function formatCadence(cadence: Cadence): string {
   }
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "₦", GHS: "₵", KES: "KSh ", PHP: "₱", USD: "$" };
+const CURRENCY_SYMBOLS: Record<string, string> = { NGN: "₦", GHS: "₵", KES: "KSh ", PHP: "₱", USD: "$", EUR: "€" };
 
 export function formatLocalAmount(amount: number, currency: string): string {
   const symbol = CURRENCY_SYMBOLS[currency] ?? `${currency} `;
