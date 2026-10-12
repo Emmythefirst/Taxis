@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import * as endpoints from "../api/endpoints";
 import { syncUser } from "../api/client";
@@ -70,10 +70,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [agentQuorumId, setAgentQuorumId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
+  // AppShell.tsx swaps the ENTIRE routed page for a bare "Loading…"
+  // placeholder while this is true — correct for the very first load
+  // (there's genuinely nothing to show yet), but refresh() is also called
+  // after every mutation across the app (a new obligation, a settled
+  // payment, a payment request's QR just having been generated) per this
+  // module's own header. Gating every one of those background refreshes
+  // behind the same flag was a real bug, not just a flicker: it unmounts
+  // and remounts whatever page is currently showing, silently discarding
+  // any in-place success UI that page had just set (confirmed live — a
+  // payment request's QR screen was being wiped the instant the
+  // background refresh() that followed it started). A ref, not state —
+  // it must survive across renders but should never itself trigger one.
+  const hasLoadedOnceRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     setError(undefined);
     try {
       // Real bug, found live: Onboarding.tsx was the ONLY place that ever
@@ -144,6 +157,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, [userId]);
